@@ -1,0 +1,57 @@
+# Environment dan secret
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build dan binary Go
+/bin/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+coverage.txt
+*.coverprofile
+
+# Log dan runtime
+*.log
+logs/
+tmp/
+.tmp/
+data/
+volumes/
+
+# IDE dan editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+docker-compose.override.yml
+
+# Artefak pengujian dan benchmark
+tests/load/results/
+artifacts/
+
+# Dokumen dan alat kerja lokal, tidak masuk repository
+/lokal/
+/_bmad/
+/_bmad-output/
+/.agents/
+/.opencode/
