@@ -280,6 +280,27 @@ func Load() (Config, error) {
 	if cfg.DB.Name == "" || cfg.DB.User == "" {
 		errs = append(errs, fmt.Errorf("DB_NAME dan DB_USER wajib diisi"))
 	}
+	if cfg.DB.MaxConns < 1 {
+		errs = append(errs, fmt.Errorf("DB_MAX_CONNS harus lebih dari 0"))
+	}
+	if cfg.DB.MinConns < 0 {
+		errs = append(errs, fmt.Errorf("DB_MIN_CONNS tidak boleh negatif"))
+	}
+	if cfg.Business.HoldTTL <= 0 {
+		errs = append(errs, fmt.Errorf("HOLD_TTL harus lebih dari 0"))
+	}
+	if cfg.Business.ReleaseGrace <= 0 {
+		errs = append(errs, fmt.Errorf("RELEASE_GRACE harus lebih dari 0"))
+	}
+	if cfg.Worker.OutboxRelayInterval <= 0 {
+		errs = append(errs, fmt.Errorf("OUTBOX_RELAY_INTERVAL harus lebih dari 0"))
+	}
+	if cfg.Worker.ExpiryScanInterval <= 0 {
+		errs = append(errs, fmt.Errorf("EXPIRY_SCAN_INTERVAL harus lebih dari 0"))
+	}
+	if cfg.Worker.PaymentReconcileEvery <= 0 {
+		errs = append(errs, fmt.Errorf("PAYMENT_RECONCILE_INTERVAL harus lebih dari 0"))
+	}
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("konfigurasi tidak valid: %w", joinErrors(errs))
 	}

@@ -52,6 +52,14 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsZeroWorkerInterval(t *testing.T) {
+	t.Setenv("OUTBOX_RELAY_INTERVAL", "0s")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+}
+
 func TestDBConfigDSN(t *testing.T) {
 	cfg := DBConfig{
 		Host:     "127.0.0.1",
