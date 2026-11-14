@@ -1,0 +1,157 @@
+name: ngawimusical
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-ngawimusical}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ngawimusical}
+      POSTGRES_DB: ${DB_NAME:-ngawimusical}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-admission:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-admission-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-queue:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-queue-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: "8080"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-ngawimusical}
+      DB_PASSWORD: ${DB_PASSWORD:-ngawimusical}
+      DB_NAME: ${DB_NAME:-ngawimusical}
+      DB_SSLMODE: disable
+      DB_MAX_CONNS: "40"
+      DB_MIN_CONNS: "5"
+      REDIS_ADMISSION_ADDR: redis-admission:6379
+      REDIS_QUEUE_ADDR: redis-queue:6379
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ngawimusical}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-development-access-secret-change-me}
+      ADMISSION_PASS_SECRET: ${ADMISSION_PASS_SECRET:-development-admission-secret-change-me}
+      TICKET_TOKEN_ENC_KEY: ${TICKET_TOKEN_ENC_KEY:-development-ticket-key-change-me}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-admission:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    command: ["-role=api"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-ngawimusical}
+      DB_PASSWORD: ${DB_PASSWORD:-ngawimusical}
+      DB_NAME: ${DB_NAME:-ngawimusical}
+      DB_SSLMODE: disable
+      REDIS_ADMISSION_ADDR: redis-admission:6379
+      REDIS_QUEUE_ADDR: redis-queue:6379
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ngawimusical}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-development-access-secret-change-me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-admission:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    command: ["-role=worker"]
+
+  scheduler:
+    build:
+      context: .
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-ngawimusical}
+      DB_PASSWORD: ${DB_PASSWORD:-ngawimusical}
+      DB_NAME: ${DB_NAME:-ngawimusical}
+      DB_SSLMODE: disable
+      REDIS_ADMISSION_ADDR: redis-admission:6379
+      REDIS_QUEUE_ADDR: redis-queue:6379
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ngawimusical}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-development-access-secret-change-me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-admission:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    command: ["-role=scheduler"]
+
+volumes:
+  postgres-data:
+  redis-admission-data:
+  redis-queue-data:
+  mongo-data:
