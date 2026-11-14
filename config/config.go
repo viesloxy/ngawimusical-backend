@@ -172,6 +172,9 @@ func Load() (Config, error) {
 	if cfg.DB.RetryMax, err = envInt("DB_RETRY_MAX", 2); err != nil {
 		errs = append(errs, err)
 	}
+	if cfg.DB.TxDeadline, err = envDuration("DB_TX_DEADLINE", 3*time.Second); err != nil {
+		errs = append(errs, err)
+	}
 
 	cfg.Redis = RedisConfig{
 		AdmissionAddr:     envString("REDIS_ADMISSION_ADDR", "127.0.0.1:6379"),
