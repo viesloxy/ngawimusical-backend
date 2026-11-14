@@ -36,6 +36,17 @@ route/          registrasi endpoint
 worker/         pekerjaan asinkron
 ```
 
+## Proses
+
+Aplikasi dapat dijalankan sebagai beberapa proses:
+
+| Role | Fungsi |
+| --- | --- |
+| `api` | HTTP API |
+| `worker` | Pekerjaan pembayaran, refund, dan notifikasi |
+| `scheduler` | Pemindai expiry dan rekonsiliasi |
+| `all` | Semua proses dalam satu binary |
+
 ## Menjalankan
 
 Prasyarat:
@@ -43,14 +54,33 @@ Prasyarat:
 - Go 1.26 atau lebih baru
 - Docker dan Docker Compose
 
+Menjalankan seluruh layanan dengan Docker:
+
 ```bash
 git clone https://github.com/viesloxy/ngawimusical-backend.git
 cd ngawimusical-backend
 cp .env.example .env
-docker compose up -d
-go mod tidy
-go run . -role=all
+docker compose up -d --build
 ```
+
+Menjalankan API secara lokal dan dependency lewat Docker:
+
+```bash
+docker compose up -d postgres redis-admission redis-queue mongo
+go mod tidy
+go run . -role=api
+```
+
+Migrasi database dijalankan otomatis saat aplikasi start. Proses `worker` dan `scheduler` saat ini masih berupa loop placeholder sampai modulnya diimplementasikan.
+
+## Endpoint
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| GET | `/health/live` | Liveness probe |
+| GET | `/health/ready` | Readiness probe |
+| GET | `/api/v1/health/live` | Alias liveness |
+| GET | `/api/v1/health/ready` | Alias readiness |
 
 ## Pengujian
 
@@ -62,7 +92,7 @@ go test ./...
 
 ## Status
 
-Tahap awal pengembangan. Struktur backend dan fitur inti sedang dikerjakan.
+Fondasi backend sudah tersedia: konfigurasi, koneksi PostgreSQL, Redis, MongoDB, migrasi awal, helper response, health check, dan Docker Compose. Modul autentikasi dan transaksi tiket sedang dikerjakan.
 
 ## Tim
 
