@@ -37,9 +37,9 @@ func (s *AuthService) Register(router fiber.Router) {
 	auth.Post("/logout", s.handleLogout)
 	auth.Get("/me", middleware.RequireAuth(s.verifyAccess), s.handleMe)
 	auth.Post("/verify-email/request", middleware.RequireAuth(s.verifyAccess), s.handleRequestVerification)
-	auth.Post("/verify-email", s.handleConfirmEmail)
-	auth.Post("/password/forgot", s.handleForgotPassword)
-	auth.Post("/password/reset", s.handleResetPassword)
+	auth.Post("/verify-email", s.limitByIP("verify"), s.handleConfirmEmail)
+	auth.Post("/password/forgot", s.limitByIP("forgot"), s.handleForgotPassword)
+	auth.Post("/password/reset", s.limitByIP("reset"), s.handleResetPassword)
 }
 
 // Respons 204 untuk alur token aksi tidak membocorkan apakah akun atau token ada.
@@ -75,6 +75,9 @@ func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
 		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
 	}
 	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if err := s.enforceLimit(c, "forgot:email:"+strings.ToLower(strings.TrimSpace(req.Email))); err != nil {
 		return err
 	}
 	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
@@ -190,6 +193,16 @@ func (s *AuthService) handleMe(c *fiber.Ctx) error {
 		Email:    user.Email,
 		Role:     user.RoleName,
 	})
+}
+
+// limitByIP membatasi jumlah request per IP untuk satu jenis aksi auth.
+func (s *AuthService) limitByIP(action string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if err := s.enforceLimit(c, action+":ip:"+c.IP()); err != nil {
+			return err
+		}
+		return c.Next()
+	}
 }
 
 // limitLogin membatasi percobaan login per IP. IP diambil dari koneksi socket, sehingga

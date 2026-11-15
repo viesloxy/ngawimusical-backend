@@ -160,7 +160,7 @@ func TestLoginOverLimitReturns429WithRetryAfter(t *testing.T) {
 }
 
 func TestForgotPasswordReturns204ForUnknownEmail(t *testing.T) {
-	app := newAuthApp(t, nil)
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
 
 	resp, _ := postJSON(t, app, "/api/v1/auth/password/forgot", `{"email":"tidak@ada.com"}`, nil)
 	if resp.StatusCode != http.StatusNoContent {
@@ -169,7 +169,7 @@ func TestForgotPasswordReturns204ForUnknownEmail(t *testing.T) {
 }
 
 func TestResetPasswordWithUnknownTokenReturns400(t *testing.T) {
-	app := newAuthApp(t, nil)
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
 
 	resp, body := postJSON(t, app, "/api/v1/auth/password/reset", `{"token":"token-palsu","new_password":"passwordbaru1"}`, nil)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -181,7 +181,7 @@ func TestResetPasswordWithUnknownTokenReturns400(t *testing.T) {
 }
 
 func TestVerifyEmailRequestWithoutTokenReturns401(t *testing.T) {
-	app := newAuthApp(t, nil)
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/verify-email/request", nil)
 	resp, _ := doRequest(t, app, req)
