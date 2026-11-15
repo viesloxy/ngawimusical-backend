@@ -519,7 +519,7 @@ func (uc *EventUsecase) transitionSaleControl(ctx context.Context, eventID int64
 }
 
 // CancelEvent membatalkan event dan memulai proses pembatalan booking.
-func (uc *EventUsecase) CancelEvent(ctx context.Context, eventID int64, actorID int64, reason string, requestID string) error {
+func (uc *EventUsecase) CancelEvent(ctx context.Context, eventID int64, actorID int64, actorRole string, reason string, requestID string) error {
 	return uc.txMgr.WithTxOnce(ctx, func(ctx context.Context, tx repository.DBTX) error {
 		event, err := uc.eventRepo.GetByIDForUpdate(ctx, tx, eventID)
 		if err != nil {
@@ -527,6 +527,11 @@ func (uc *EventUsecase) CancelEvent(ctx context.Context, eventID int64, actorID 
 				return helper.NotFound()
 			}
 			return fmt.Errorf("ambil event: %w", err)
+		}
+
+		// Hanya organizer pemilik atau admin yang boleh membatalkan. Pihak lain dianggap tidak menemukan event.
+		if event.OrganizerID != actorID && actorRole != model.RoleAdmin {
+			return helper.NotFound()
 		}
 
 		if !event.CanTransitionTo(model.EventStatusCancelled) {

@@ -83,15 +83,20 @@ func (s *EventService) GetEvent(c *fiber.Ctx) error {
 		return err
 	}
 
-	// Jika event bukan PUBLISHED, hanya organizer pemilik atau admin yang boleh melihat
-	if event.Status != model.EventStatusPublished {
-		actor, ok := middleware.GetActor(c)
-		if !ok || (actor.UserID != event.OrganizerID && actor.Role != "admin") {
-			return helper.NotFound()
-		}
+	if !canViewEvent(c, event) {
+		return helper.NotFound()
 	}
 
 	return helper.OK(c, event)
+}
+
+// canViewEvent: event PUBLISHED boleh dilihat siapa saja; selain itu hanya organizer pemilik atau admin.
+func canViewEvent(c *fiber.Ctx, event *model.Event) bool {
+	if event.Status == model.EventStatusPublished {
+		return true
+	}
+	actor, ok := middleware.GetActor(c)
+	return ok && (actor.UserID == event.OrganizerID || actor.Role == model.RoleAdmin)
 }
 
 // ListPublishedEvents menangani GET /api/v1/events.
@@ -223,6 +228,14 @@ func (s *EventService) ListTiers(c *fiber.Ctx) error {
 		return helper.NewAppError(400, "MALFORMED_JSON", "ID event tidak valid.")
 	}
 
+	event, err := s.uc.GetEvent(c.UserContext(), eventID)
+	if err != nil {
+		return err
+	}
+	if !canViewEvent(c, event) {
+		return helper.NotFound()
+	}
+
 	tiers, err := s.uc.ListTiers(c.UserContext(), eventID)
 	if err != nil {
 		return err
@@ -327,6 +340,9 @@ func (s *EventService) CancelEvent(c *fiber.Ctx) error {
 	if !ok {
 		return helper.Unauthenticated()
 	}
+	if actor.Role != model.RoleOrganizer && actor.Role != model.RoleAdmin {
+		return helper.Forbidden()
+	}
 
 	var body struct {
 		Reason string `json:"reason" validate:"required,min=3,max=500"`
@@ -339,7 +355,7 @@ func (s *EventService) CancelEvent(c *fiber.Ctx) error {
 	}
 
 	requestID := helper.RequestID(c)
-	if err := s.uc.CancelEvent(c.UserContext(), eventID, actor.UserID, body.Reason, requestID); err != nil {
+	if err := s.uc.CancelEvent(c.UserContext(), eventID, actor.UserID, actor.Role, body.Reason, requestID); err != nil {
 		return err
 	}
 

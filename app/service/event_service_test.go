@@ -359,3 +359,77 @@ func TestEventService_CreateEvent_WithActor(t *testing.T) {
 		t.Errorf("status = %d; want 201 Created", resp.StatusCode)
 	}
 }
+
+// newEventAppAs membuat app event dengan aktor palsu. Aktor nil berarti pengunjung anonim.
+func newEventAppAs(actor *middleware.Actor, events ...*model.Event) (*fiber.App, *fakeEventRepo) {
+	app := fiber.New(fiber.Config{ErrorHandler: helper.ErrorHandler})
+
+	eventRepo := newFakeEventRepo()
+	for _, e := range events {
+		eventRepo.events[e.ID] = e
+	}
+	uc := service.NewEventUsecase(&noopTxMgr{}, eventRepo, newFakeTierRepo(), &fakeStaffRepo{}, &fakeAuditRepo{}, &fakeOutboxRepo{})
+	svc := service.NewEventService(uc, []byte("test-secret-at-least-32-bytes-long!"))
+
+	if actor != nil {
+		app.Use(func(c *fiber.Ctx) error {
+			middleware.SetActor(c, *actor)
+			return c.Next()
+		})
+	}
+	svc.Register(app.Group("/api/v1"))
+	return app, eventRepo
+}
+
+func TestCancelEventByOtherOrganizerReturns404(t *testing.T) {
+	event := &model.Event{ID: 1, OrganizerID: 10, Status: model.EventStatusPublished, Version: 1}
+	app, _ := newEventAppAs(&middleware.Actor{UserID: 99, Role: model.RoleOrganizer}, event)
+
+	resp, _ := postJSON(t, app, "/api/v1/events/1/cancel", `{"reason":"alasan uji"}`, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("organizer lain harus 404, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestCancelEventByAttendeeReturns403(t *testing.T) {
+	event := &model.Event{ID: 1, OrganizerID: 10, Status: model.EventStatusPublished, Version: 1}
+	app, _ := newEventAppAs(&middleware.Actor{UserID: 99, Role: model.RoleAttendee}, event)
+
+	resp, _ := postJSON(t, app, "/api/v1/events/1/cancel", `{"reason":"alasan uji"}`, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("attendee harus 403, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestListTiersOfDraftEventHiddenFromPublic(t *testing.T) {
+	event := &model.Event{ID: 1, OrganizerID: 10, Status: model.EventStatusDraft, Version: 1}
+	app, _ := newEventAppAs(nil, event)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/1/tiers", nil)
+	resp, _ := doRequest(t, app, req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("tier event draft harus 404 untuk publik, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestListTiersOfDraftEventVisibleToOwner(t *testing.T) {
+	event := &model.Event{ID: 1, OrganizerID: 10, Status: model.EventStatusDraft, Version: 1}
+	app, _ := newEventAppAs(&middleware.Actor{UserID: 10, Role: model.RoleOrganizer}, event)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/1/tiers", nil)
+	resp, _ := doRequest(t, app, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pemilik harus bisa melihat tier draft, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestListTiersOfPublishedEventVisibleToPublic(t *testing.T) {
+	event := &model.Event{ID: 1, OrganizerID: 10, Status: model.EventStatusPublished, Version: 1}
+	app, _ := newEventAppAs(nil, event)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/1/tiers", nil)
+	resp, _ := doRequest(t, app, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("event published harus terbuka untuk publik, dapat %d", resp.StatusCode)
+	}
+}
