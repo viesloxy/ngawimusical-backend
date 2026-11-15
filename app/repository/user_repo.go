@@ -100,7 +100,7 @@ func (userPostgres) UpdateProfile(ctx context.Context, db DBTX, user model.User)
 		return ErrNotFound
 	}
 	if current != email {
-		return revokeAllRefreshTokens(ctx, db, user.ID)
+		return credentialChanged(ctx, db, user.ID)
 	}
 	return nil
 }
@@ -122,7 +122,7 @@ func (userPostgres) UpdatePassword(ctx context.Context, db DBTX, userID int64, p
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return revokeAllRefreshTokens(ctx, db, userID)
+	return credentialChanged(ctx, db, userID)
 }
 
 // MarkEmailVerified menandai email user sudah diverifikasi. Nilai yang sudah ada tidak ditimpa.
@@ -141,6 +141,21 @@ func (userPostgres) MarkEmailVerified(ctx context.Context, db DBTX, userID int64
 		return ErrNotFound
 	}
 	return nil
+}
+
+// credentialChanged dipanggil setiap kali kredensial berubah: sesi lama dan token aksi yang masih
+// terbuka ikut dibatalkan dalam transaksi yang sama.
+func credentialChanged(ctx context.Context, db DBTX, userID int64) error {
+	if err := revokeAllRefreshTokens(ctx, db, userID); err != nil {
+		return err
+	}
+	_, err := db.Exec(ctx, `
+		UPDATE identity_action_tokens
+		SET consumed_at = clock_timestamp()
+		WHERE user_id = $1 AND consumed_at IS NULL`,
+		userID,
+	)
+	return mapDBError(err)
 }
 
 func revokeAllRefreshTokens(ctx context.Context, db DBTX, userID int64) error {
