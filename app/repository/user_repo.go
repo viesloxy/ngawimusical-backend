@@ -19,6 +19,8 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, db DBTX, email string) (model.User, error)
 	FindByID(ctx context.Context, db DBTX, id int64) (model.User, error)
 	UpdateProfile(ctx context.Context, db DBTX, user model.User) error
+	UpdatePassword(ctx context.Context, db DBTX, userID int64, passwordHash string) error
+	MarkEmailVerified(ctx context.Context, db DBTX, userID int64) error
 
 	CreateRefreshToken(ctx context.Context, db DBTX, token model.RefreshToken) (model.RefreshToken, error)
 	FindRefreshTokenByHash(ctx context.Context, db DBTX, tokenHash string) (model.RefreshToken, error)
@@ -74,6 +76,12 @@ func (userPostgres) FindByID(ctx context.Context, db DBTX, id int64) (model.User
 }
 
 func (userPostgres) UpdateProfile(ctx context.Context, db DBTX, user model.User) error {
+	var current string
+	if err := db.QueryRow(ctx, `SELECT email FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&current); err != nil {
+		return mapDBError(err)
+	}
+	email := normalizeEmail(user.Email)
+
 	// Email yang berubah harus diverifikasi ulang dan mencabut sesi lama lewat auth_version.
 	tag, err := db.Exec(ctx, `
 		UPDATE users
@@ -83,7 +91,48 @@ func (userPostgres) UpdateProfile(ctx context.Context, db DBTX, user model.User)
 		    auth_version = CASE WHEN email IS DISTINCT FROM $3 THEN auth_version + 1 ELSE auth_version END,
 		    updated_at = clock_timestamp()
 		WHERE id = $1`,
-		user.ID, user.Username, normalizeEmail(user.Email),
+		user.ID, user.Username, email,
+	)
+	if err != nil {
+		return mapDBError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if current != email {
+		return revokeAllRefreshTokens(ctx, db, user.ID)
+	}
+	return nil
+}
+
+// UpdatePassword mengganti hash password, menaikkan auth_version agar access token lama
+// tidak lagi lolos, dan mencabut seluruh refresh token user. Pemanggil wajib memakai transaksi.
+func (userPostgres) UpdatePassword(ctx context.Context, db DBTX, userID int64, passwordHash string) error {
+	tag, err := db.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $2,
+		    auth_version = auth_version + 1,
+		    updated_at = clock_timestamp()
+		WHERE id = $1`,
+		userID, passwordHash,
+	)
+	if err != nil {
+		return mapDBError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return revokeAllRefreshTokens(ctx, db, userID)
+}
+
+// MarkEmailVerified menandai email user sudah diverifikasi. Nilai yang sudah ada tidak ditimpa.
+func (userPostgres) MarkEmailVerified(ctx context.Context, db DBTX, userID int64) error {
+	tag, err := db.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = COALESCE(email_verified_at, clock_timestamp()),
+		    updated_at = clock_timestamp()
+		WHERE id = $1`,
+		userID,
 	)
 	if err != nil {
 		return mapDBError(err)
@@ -92,6 +141,16 @@ func (userPostgres) UpdateProfile(ctx context.Context, db DBTX, user model.User)
 		return ErrNotFound
 	}
 	return nil
+}
+
+func revokeAllRefreshTokens(ctx context.Context, db DBTX, userID int64) error {
+	_, err := db.Exec(ctx, `
+		UPDATE refresh_tokens
+		SET revoked_at = clock_timestamp()
+		WHERE user_id = $1 AND revoked_at IS NULL`,
+		userID,
+	)
+	return mapDBError(err)
 }
 
 func (userPostgres) CreateRefreshToken(ctx context.Context, db DBTX, token model.RefreshToken) (model.RefreshToken, error) {

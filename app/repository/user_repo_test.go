@@ -13,6 +13,7 @@ import (
 	"github.com/viesloxy/ngawimusical-backend/app/repository"
 	"github.com/viesloxy/ngawimusical-backend/config"
 	"github.com/viesloxy/ngawimusical-backend/database"
+	"github.com/viesloxy/ngawimusical-backend/helper"
 )
 
 // openTestPool memakai PostgreSQL dari konfigurasi environment.
@@ -136,5 +137,74 @@ func TestIdentityActionTokenIsSingleUse(t *testing.T) {
 	}
 	if _, err := repo.ConsumeIdentityActionToken(ctx, pool, hash, model.PurposeVerifyEmail, now); !errors.Is(err, repository.ErrConflict) {
 		t.Fatalf("pemakaian kedua harus ErrConflict, dapat: %v", err)
+	}
+}
+
+// Mengganti password harus menaikkan auth_version dan mencabut seluruh refresh token user.
+func TestUpdatePasswordRevokesRefreshTokens(t *testing.T) {
+	pool := openTestPool(t)
+	repo := repository.NewUserRepository()
+	user := createTestUser(t, repo, pool)
+	ctx := context.Background()
+
+	token, err := repo.CreateRefreshToken(ctx, pool, model.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: helper.HashRefreshToken(uuid.NewString()),
+		FamilyID:  uuid.NewString(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("buat refresh token: %v", err)
+	}
+
+	if err := repo.UpdatePassword(ctx, pool, user.ID, "hash-baru"); err != nil {
+		t.Fatalf("update password: %v", err)
+	}
+
+	updated, err := repo.FindByID(ctx, pool, user.ID)
+	if err != nil {
+		t.Fatalf("baca user: %v", err)
+	}
+	if updated.AuthVersion != user.AuthVersion+1 {
+		t.Fatalf("auth_version harus naik, dapat %d", updated.AuthVersion)
+	}
+
+	revoked, err := repo.FindRefreshTokenByHash(ctx, pool, token.TokenHash)
+	if err != nil {
+		t.Fatalf("baca refresh token: %v", err)
+	}
+	if revoked.RevokedAt == nil {
+		t.Fatal("refresh token harus dicabut setelah password diganti")
+	}
+}
+
+// Mengubah email harus mencabut refresh token lama lewat pencabutan seluruh token user.
+func TestEmailChangeRevokesRefreshTokens(t *testing.T) {
+	pool := openTestPool(t)
+	repo := repository.NewUserRepository()
+	user := createTestUser(t, repo, pool)
+	ctx := context.Background()
+
+	token, err := repo.CreateRefreshToken(ctx, pool, model.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: helper.HashRefreshToken(uuid.NewString()),
+		FamilyID:  uuid.NewString(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("buat refresh token: %v", err)
+	}
+
+	user.Email = uuid.NewString() + "@example.test"
+	if err := repo.UpdateProfile(ctx, pool, user); err != nil {
+		t.Fatalf("update profil: %v", err)
+	}
+
+	revoked, err := repo.FindRefreshTokenByHash(ctx, pool, token.TokenHash)
+	if err != nil {
+		t.Fatalf("baca refresh token: %v", err)
+	}
+	if revoked.RevokedAt == nil {
+		t.Fatal("refresh token harus dicabut setelah email berubah")
 	}
 }

@@ -68,6 +68,42 @@ func (f *fakeRepo) FindByID(_ context.Context, _ repository.DBTX, id int64) (mod
 
 func (f *fakeRepo) UpdateProfile(context.Context, repository.DBTX, model.User) error { return nil }
 
+// UpdatePassword meniru repository: hash diganti, auth_version naik, dan seluruh refresh token dicabut.
+func (f *fakeRepo) UpdatePassword(_ context.Context, _ repository.DBTX, userID int64, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.users[userID]
+	if !ok {
+		return repository.ErrNotFound
+	}
+	u.PasswordHash = hash
+	u.AuthVersion++
+	f.users[userID] = u
+	now := time.Now()
+	for id, t := range f.tokens {
+		if t.UserID == userID && t.RevokedAt == nil {
+			t.RevokedAt = &now
+			f.tokens[id] = t
+		}
+	}
+	return nil
+}
+
+func (f *fakeRepo) MarkEmailVerified(_ context.Context, _ repository.DBTX, userID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.users[userID]
+	if !ok {
+		return repository.ErrNotFound
+	}
+	if u.EmailVerifiedAt == nil {
+		now := time.Now()
+		u.EmailVerifiedAt = &now
+		f.users[userID] = u
+	}
+	return nil
+}
+
 func (f *fakeRepo) CreateRefreshToken(_ context.Context, _ repository.DBTX, t model.RefreshToken) (model.RefreshToken, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
