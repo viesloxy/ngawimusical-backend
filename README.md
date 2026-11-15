@@ -4,13 +4,24 @@ REST API untuk penjualan tiket konser NgawiMusical. Proyek ini dibangun dengan G
 
 ## Fitur
 
-- Autentikasi dan otorisasi berbasis role
-- Katalog event dan kategori tiket
-- Waiting room dan pembatasan antrean
-- Reservasi stok sementara
-- Pembayaran dan penerbitan e-ticket
-- Check-in tiket
-- Laporan penjualan
+Sudah tersedia:
+
+- Registrasi, login, refresh token, dan logout.
+- Otorisasi berbasis role dan ownership.
+- Katalog event published beserta tier.
+- Pembuatan draft event, tier, publish, pause, resume, dan close.
+- Reservasi hold tiket dengan batas stok dan batas per akun.
+- Pembatalan hold sebelum pembayaran.
+- Idempotency untuk create hold.
+- Health check dan Docker Compose.
+
+Rencana berikutnya:
+
+- Waiting room dan admission pass.
+- Pembayaran dan penerbitan e-ticket.
+- Check-in tiket.
+- Refund dan laporan penjualan.
+- Modul ulasan MongoDB.
 
 ## Teknologi
 
@@ -71,7 +82,7 @@ go mod tidy
 go run . -role=api
 ```
 
-Migrasi database dijalankan otomatis saat aplikasi start. Proses `worker` dan `scheduler` saat ini masih berupa loop placeholder sampai modulnya diimplementasikan.
+Migrasi database dijalankan otomatis saat aplikasi start dan dilindungi advisory lock agar aman ketika beberapa proses start bersamaan. Port host Compose dapat diubah lewat `API_PORT`, misalnya `API_PORT=18080 docker compose up -d`. Proses `worker` dan `scheduler` saat ini masih berupa loop placeholder sampai modul pembayaran dan expiry diimplementasikan.
 
 ## Endpoint
 
@@ -79,8 +90,30 @@ Migrasi database dijalankan otomatis saat aplikasi start. Proses `worker` dan `s
 | --- | --- | --- |
 | GET | `/health/live` | Liveness probe |
 | GET | `/health/ready` | Readiness probe |
-| GET | `/api/v1/health/live` | Alias liveness |
-| GET | `/api/v1/health/ready` | Alias readiness |
+| POST | `/api/v1/auth/register` | Registrasi akun |
+| POST | `/api/v1/auth/login` | Login |
+| POST | `/api/v1/auth/refresh` | Rotasi refresh token |
+| POST | `/api/v1/auth/logout` | Logout |
+| GET | `/api/v1/auth/me` | Profil sendiri |
+| GET | `/api/v1/events` | Daftar event published |
+| GET | `/api/v1/events/:id` | Detail event |
+| GET | `/api/v1/events/:id/tiers` | Daftar tier |
+| POST | `/api/v1/events` | Buat draft event |
+| PATCH | `/api/v1/events/:id` | Ubah draft event |
+| POST | `/api/v1/events/:id/tiers` | Tambah tier |
+| PATCH | `/api/v1/tiers/:id` | Ubah tier |
+| POST | `/api/v1/events/:id/publish` | Publikasikan event |
+| POST | `/api/v1/events/:id/pause` | Jeda penjualan |
+| POST | `/api/v1/events/:id/resume` | Lanjutkan penjualan |
+| POST | `/api/v1/events/:id/close` | Tutup penjualan |
+| POST | `/api/v1/events/:id/cancel` | Batalkan event |
+| POST | `/api/v1/events/:id/complete` | Selesaikan event |
+| POST | `/api/v1/bookings` | Buat hold tiket |
+| GET | `/api/v1/bookings` | Daftar booking sendiri |
+| GET | `/api/v1/bookings/:id` | Detail booking |
+| POST | `/api/v1/bookings/:id/cancel` | Batalkan hold |
+
+Endpoint create booking membutuhkan header `Idempotency-Key` sepanjang 16 sampai 128 karakter.
 
 ## Pengujian
 
@@ -92,7 +125,7 @@ go test ./...
 
 ## Status
 
-Fondasi backend sudah tersedia: konfigurasi, koneksi PostgreSQL, Redis, MongoDB, migrasi awal, helper response, health check, dan Docker Compose. Modul autentikasi dan transaksi tiket sedang dikerjakan.
+Modul autentikasi, katalog event, dan reservasi hold sudah berjalan dan diuji melalui Docker Compose. Pembayaran, e-ticket, check-in, refund, laporan, dan ulasan belum diimplementasikan.
 
 ## Tim
 
