@@ -36,6 +36,65 @@ func (s *AuthService) Register(router fiber.Router) {
 	auth.Post("/refresh", s.handleRefresh)
 	auth.Post("/logout", s.handleLogout)
 	auth.Get("/me", middleware.RequireAuth(s.verifyAccess), s.handleMe)
+	auth.Post("/verify-email/request", middleware.RequireAuth(s.verifyAccess), s.handleRequestVerification)
+	auth.Post("/verify-email", s.handleConfirmEmail)
+	auth.Post("/password/forgot", s.handleForgotPassword)
+	auth.Post("/password/reset", s.handleResetPassword)
+}
+
+// Respons 204 untuk alur token aksi tidak membocorkan apakah akun atau token ada.
+// Token mentah belum dikirim ke user karena layanan email belum ada; usecase hanya mengembalikannya ke pemanggil.
+func (s *AuthService) handleRequestVerification(c *fiber.Ctx) error {
+	actor, ok := middleware.GetActor(c)
+	if !ok {
+		return helper.Unauthenticated()
+	}
+	if _, err := s.usecase.RequestEmailVerification(c.UserContext(), actor.UserID); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleConfirmEmail(c *fiber.Ctx) error {
+	var req model.VerifyEmailRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if err := s.usecase.ConfirmEmail(c.UserContext(), req.Token); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
+	var req model.ForgotPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleResetPassword(c *fiber.Ctx) error {
+	var req model.ResetPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if err := s.usecase.ResetPassword(c.UserContext(), req.Token, req.NewPassword); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
 }
 
 func (s *AuthService) handleRegister(c *fiber.Ctx) error {
