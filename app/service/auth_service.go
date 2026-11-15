@@ -77,7 +77,12 @@ func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
 	if err := helper.Validate(req); err != nil {
 		return err
 	}
-	if err := s.enforceLimit(c, "forgot:pair:"+strings.ToLower(strings.TrimSpace(req.Email))+"|"+c.IP()); err != nil {
+	normalized := strings.ToLower(strings.TrimSpace(req.Email))
+	// Batas ganda: per pasangan email|IP dan per email, agar penyerang dari banyak IP tetap terbatas.
+	if err := s.enforceLimit(c, "forgot:pair:"+normalized+"|"+c.IP()); err != nil {
+		return err
+	}
+	if err := s.enforceLimit(c, "forgot:email:"+normalized); err != nil {
 		return err
 	}
 	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
