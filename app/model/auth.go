@@ -28,6 +28,11 @@ type VerifyEmailRequest struct {
 	Token string `json:"token" validate:"required"`
 }
 
+// ForgotPasswordRequest adalah payload permintaan reset password.
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email,max=120"`
+}
+
 // ResetPasswordRequest adalah payload pengaturan ulang password.
 type ResetPasswordRequest struct {
 	Token       string `json:"token" validate:"required"`

@@ -158,3 +158,34 @@ func TestLoginOverLimitReturns429WithRetryAfter(t *testing.T) {
 		t.Fatal("respons 429 harus menyertakan Retry-After")
 	}
 }
+
+func TestForgotPasswordReturns204ForUnknownEmail(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
+
+	resp, _ := postJSON(t, app, "/api/v1/auth/password/forgot", `{"email":"tidak@ada.com"}`, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("email tidak terdaftar harus 204, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestResetPasswordWithUnknownTokenReturns400(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
+
+	resp, body := postJSON(t, app, "/api/v1/auth/password/reset", `{"token":"token-palsu","new_password":"passwordbaru1"}`, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("token tidak valid harus 400, dapat %d", resp.StatusCode)
+	}
+	if code := errorCode(t, body); code != "TOKEN_INVALID" {
+		t.Fatalf("kode harus TOKEN_INVALID, dapat %s", code)
+	}
+}
+
+func TestVerifyEmailRequestWithoutTokenReturns401(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(100, time.Minute))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/verify-email/request", nil)
+	resp, _ := doRequest(t, app, req)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("tanpa token harus 401, dapat %d", resp.StatusCode)
+	}
+}

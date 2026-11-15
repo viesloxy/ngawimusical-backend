@@ -36,6 +36,76 @@ func (s *AuthService) Register(router fiber.Router) {
 	auth.Post("/refresh", s.handleRefresh)
 	auth.Post("/logout", s.handleLogout)
 	auth.Get("/me", middleware.RequireAuth(s.verifyAccess), s.handleMe)
+	auth.Post("/verify-email/request", middleware.RequireAuth(s.verifyAccess), s.handleRequestVerification)
+	auth.Post("/verify-email", s.limitByIP("verify"), s.handleConfirmEmail)
+	auth.Post("/password/forgot", s.limitByIP("forgot"), s.handleForgotPassword)
+	auth.Post("/password/reset", s.limitByIP("reset"), s.handleResetPassword)
+}
+
+// Respons 204 untuk alur token aksi tidak membocorkan apakah akun atau token ada.
+// Token mentah belum dikirim ke user karena layanan email belum ada; usecase hanya mengembalikannya ke pemanggil.
+func (s *AuthService) handleRequestVerification(c *fiber.Ctx) error {
+	actor, ok := middleware.GetActor(c)
+	if !ok {
+		return helper.Unauthenticated()
+	}
+	if _, err := s.usecase.RequestEmailVerification(c.UserContext(), actor.UserID); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleConfirmEmail(c *fiber.Ctx) error {
+	var req model.VerifyEmailRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if err := s.usecase.ConfirmEmail(c.UserContext(), req.Token); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
+	var req model.ForgotPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	normalized := strings.ToLower(strings.TrimSpace(req.Email))
+	// Batas ganda: per pasangan email|IP dan per email, agar penyerang dari banyak IP tetap terbatas.
+	if err := s.enforceLimit(c, "forgot:pair:"+normalized+"|"+c.IP()); err != nil {
+		return err
+	}
+	// Batas per email tidak menolak request: token baru hanya tidak dibuat, dan respons tetap 204,
+	// sehingga pemilik akun tidak terkunci dari pemulihan dan penyerang tidak tahu email terdaftar.
+	allowed, _, err := s.limiter.Allow(c.UserContext(), "forgot:email:"+normalized)
+	if err != nil || !allowed {
+		return helper.NoContent(c)
+	}
+	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
+}
+
+func (s *AuthService) handleResetPassword(c *fiber.Ctx) error {
+	var req model.ResetPasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helper.NewAppError(http.StatusBadRequest, "MALFORMED_JSON", "Format request tidak valid.")
+	}
+	if err := helper.Validate(req); err != nil {
+		return err
+	}
+	if err := s.usecase.ResetPassword(c.UserContext(), req.Token, req.NewPassword); err != nil {
+		return err
+	}
+	return helper.NoContent(c)
 }
 
 func (s *AuthService) handleRegister(c *fiber.Ctx) error {
@@ -133,6 +203,16 @@ func (s *AuthService) handleMe(c *fiber.Ctx) error {
 	})
 }
 
+// limitByIP membatasi jumlah request per IP untuk satu jenis aksi auth.
+func (s *AuthService) limitByIP(action string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if err := s.enforceLimit(c, action+":ip:"+c.IP()); err != nil {
+			return err
+		}
+		return c.Next()
+	}
+}
+
 // limitLogin membatasi percobaan login per IP. IP diambil dari koneksi socket, sehingga
 // header X-Forwarded-For hanya dipercaya bila wiring utama mengaktifkan trusted proxy.
 func (s *AuthService) limitLogin(c *fiber.Ctx) error {
@@ -150,7 +230,7 @@ func (s *AuthService) enforceLimit(c *fiber.Ctx, key string) error {
 	}
 	if !allowed {
 		c.Set(fiber.HeaderRetryAfter, strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-		return helper.NewAppError(http.StatusTooManyRequests, "RATE_LIMITED", "Terlalu banyak percobaan login.").WithRetryable(true)
+		return helper.NewAppError(http.StatusTooManyRequests, "RATE_LIMITED", "Terlalu banyak percobaan, coba lagi nanti.").WithRetryable(true)
 	}
 	return nil
 }
