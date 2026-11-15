@@ -2,26 +2,46 @@
 
 REST API untuk penjualan tiket konser NgawiMusical. Proyek ini dibangun dengan Go dan Clean Architecture sebagai tugas kelompok mata kuliah Pemrograman Backend Lanjut.
 
+## Deskripsi Sistem
+
+NgawiMusical Backend melayani katalog konser, pengelolaan event, reservasi hold tiket, pembatalan hold, autentikasi, dan health check. PostgreSQL menjadi sumber kebenaran untuk stok, booking, idempotency, ledger, dan outbox. Redis dipakai untuk admission dan antrean. MongoDB disiapkan untuk modul ulasan.
+
+Fokus utama sistem adalah mencegah stok negatif, membatasi tiket per akun, membuat retry aman melalui idempotency, dan menjaga seluruh perubahan stok dalam satu transaksi.
+
+## Tim dan Peran
+
+| Anggota | NIM | GitHub | Peran | Branch |
+| --- | --- | --- | --- | --- |
+| Muhammad Ikhsanudin Arsalan | 434241083 | [@ZaganJade](https://github.com/ZaganJade) | Autentikasi, otorisasi, keamanan API | `feat/auth-arsalan` |
+| Vito Aditya | 434241084 | [@viesloxy](https://github.com/viesloxy) | Git Master, infrastruktur, integrasi | `feat/infra-vito` |
+| Muhammad Rizki Ibrahim | 434241085 | [@rzkibrahim](https://github.com/rzkibrahim) | Event, booking, konkurensi, worker | `feat/domain-rizki` |
+
+## Role pada Sistem
+
+| Role | Hak akses utama |
+| --- | --- |
+| Pengunjung | Melihat katalog event published dan daftar tier |
+| Attendee | Mendaftar, login, melihat katalog, membuat hold, dan membatalkan hold |
+| Organizer | Mengelola event miliknya, menambah tier, publish, pause, resume, close, dan cancel |
+| Gate staff | Disiapkan untuk validasi tiket pada tahap check-in |
+| Admin | Disiapkan untuk pengelolaan role, exception, audit, dan operasi |
+
 ## Fitur
 
-Sudah tersedia:
-
-- Registrasi, login, refresh token, dan logout.
-- Otorisasi berbasis role dan ownership.
-- Katalog event published beserta tier.
-- Pembuatan draft event, tier, publish, pause, resume, dan close.
-- Reservasi hold tiket dengan batas stok dan batas per akun.
-- Pembatalan hold sebelum pembayaran.
-- Idempotency untuk create hold.
-- Health check dan Docker Compose.
-
-Rencana berikutnya:
-
-- Waiting room dan admission pass.
-- Pembayaran dan penerbitan e-ticket.
-- Check-in tiket.
-- Refund dan laporan penjualan.
-- Modul ulasan MongoDB.
+| No | Fitur | Role | Status |
+| --- | --- | --- | --- |
+| 1 | Registrasi dan login | Semua | Selesai |
+| 2 | Refresh token dan logout | Attendee, organizer, admin | Selesai |
+| 3 | Verifikasi email dan reset password | Semua | Selesai di kode, pengiriman email belum |
+| 4 | Katalog event published | Publik | Selesai |
+| 5 | Pengelolaan draft event dan tier | Organizer, admin | Selesai |
+| 6 | Publish, pause, resume, close, cancel | Organizer, admin | Selesai |
+| 7 | Reservasi hold tiket | Attendee | Selesai |
+| 8 | Pembatalan hold | Attendee | Selesai |
+| 9 | Idempotency create hold | Attendee | Selesai |
+| 10 | Health check dan Docker Compose | Infrastruktur | Selesai |
+| 11 | Pembayaran, e-ticket, check-in | Attendee, gate staff | Belum |
+| 12 | Refund, laporan, ulasan | Admin, organizer | Belum |
 
 ## Teknologi
 
@@ -32,31 +52,97 @@ Rencana berikutnya:
 - MongoDB
 - Docker Compose
 
-## Struktur proyek
+## Arsitektur
+
+```text
+Client
+  -> Fiber API
+  -> service HTTP
+  -> usecase
+  -> repository
+  -> PostgreSQL
+
+Redis admission dan queue, MongoDB ulasan, worker, serta scheduler
+dijalankan sebagai komponen pendukung.
+```
+
+Aturan dependensi:
+
+- `app/model` tidak mengimpor package internal proyek.
+- `app/repository` tidak mengimpor Fiber.
+- `app/service/*_usecase.go` tidak menerima `*fiber.Ctx` dan tidak menulis SQL.
+- `app/service/*_service.go` menangani HTTP dan memanggil usecase.
+- Semua error dipetakan ke envelope response yang sama.
+- Tidak ada folder `controller/` atau `handler/`.
+
+## Struktur Repository
 
 ```text
 app/
-  model/        entity, value object, dan DTO
+  model/        entity, value object, DTO, aturan transisi
   repository/   kontrak dan implementasi akses data
   service/      usecase dan handler HTTP
 config/         konfigurasi aplikasi
 database/       koneksi database dan migrasi
-helper/         utilitas umum
-middleware/     middleware HTTP
+helper/         error, response, validator, cursor, crypto
+middleware/     request id, actor, auth, rate limit
 route/          registrasi endpoint
-worker/         pekerjaan asinkron
+worker/         worker dan scheduler
 ```
 
-## Proses
+## Rancangan Database
 
-Aplikasi dapat dijalankan sebagai beberapa proses:
+| Kelompok | Tabel | Fungsi |
+| --- | --- | --- |
+| Autentikasi | `users`, `roles`, `role_permissions`, `refresh_tokens`, `identity_action_tokens` | Akun, role, sesi, dan token aksi |
+| Event | `events`, `event_staff`, `ticket_tiers`, `user_event_limits` | Katalog, tier, staf, dan batas tiket per akun |
+| Booking | `bookings`, `booking_changes`, `admission_redemptions`, `idempotency_records`, `inventory_movements` | Hold, riwayat, idempotency, dan ledger stok |
+| Pembayaran | `payment_attempts`, `payment_inbox`, `refunds` | Disiapkan untuk pembayaran dan refund |
+| Tiket | `tickets`, `check_ins` | Disiapkan untuk e-ticket dan check-in |
+| Operasional | `outbox`, `consumer_receipts`, `notification_deliveries`, `audit_logs`, `operational_exceptions` | Pekerjaan asinkron, audit, dan exception |
 
-| Role | Fungsi |
-| --- | --- |
-| `api` | HTTP API |
-| `worker` | Pekerjaan pembayaran, refund, dan notifikasi |
-| `scheduler` | Pemindai expiry dan rekonsiliasi |
-| `all` | Semua proses dalam satu binary |
+Invariant utama:
+
+- `held_count + sold_count + retired_count <= quota`.
+- `held + purchased_total <= frozen_max`.
+- Satu akun hanya boleh punya satu hold aktif per event.
+- Create hold memakai conditional update agar stok tidak negatif.
+- Uang memakai integer rupiah `int64`, waktu memakai UTC.
+
+## Endpoint
+
+| Method | Path | Akses |
+| --- | --- | --- |
+| POST | `/api/v1/auth/register` | Publik |
+| POST | `/api/v1/auth/login` | Publik |
+| POST | `/api/v1/auth/refresh` | Refresh token |
+| POST | `/api/v1/auth/logout` | Pemilik sesi |
+| GET | `/api/v1/auth/me` | Terautentikasi |
+| POST | `/api/v1/auth/verify-email/request` | Terautentikasi |
+| POST | `/api/v1/auth/verify-email` | Token |
+| POST | `/api/v1/auth/password/forgot` | Publik |
+| POST | `/api/v1/auth/password/reset` | Token |
+| GET | `/api/v1/events` | Publik |
+| GET | `/api/v1/events/:id` | Publik atau pemilik |
+| GET | `/api/v1/events/:id/tiers` | Publik atau pemilik |
+| POST | `/api/v1/events` | Organizer, admin |
+| PATCH | `/api/v1/events/:id` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/tiers` | Organizer pemilik, admin |
+| PATCH | `/api/v1/tiers/:id` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/publish` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/pause` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/resume` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/close` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/cancel` | Organizer pemilik, admin |
+| POST | `/api/v1/events/:id/complete` | Organizer pemilik, admin |
+| POST | `/api/v1/bookings` | Attendee, Idempotency-Key |
+| GET | `/api/v1/bookings` | Pemilik |
+| GET | `/api/v1/bookings/:id` | Pemilik |
+| POST | `/api/v1/bookings/:id/cancel` | Pemilik |
+| GET | `/health/live` | Infrastruktur |
+| GET | `/health/ready` | Infrastruktur |
+
+Response sukses memakai bentuk `{"data": ..., "request_id": "req_..."}`. Response error memakai bentuk `{"error": {"code": ..., "message": ..., "fields": ..., "retryable": ...}, "request_id": "req_..."}`.
 
 ## Menjalankan
 
@@ -74,7 +160,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Menjalankan API secara lokal dan dependency lewat Docker:
+Jika port 8080 dipakai proses lain, atur port host:
+
+```bash
+API_PORT=18080 docker compose up -d --build
+```
+
+Menjalankan API lokal dengan dependency Docker:
 
 ```bash
 docker compose up -d postgres redis-admission redis-queue mongo
@@ -82,55 +174,57 @@ go mod tidy
 go run . -role=api
 ```
 
-Migrasi database dijalankan otomatis saat aplikasi start dan dilindungi advisory lock agar aman ketika beberapa proses start bersamaan. Port host Compose dapat diubah lewat `API_PORT`, misalnya `API_PORT=18080 docker compose up -d`. Proses `worker` dan `scheduler` saat ini masih berupa loop placeholder sampai modul pembayaran dan expiry diimplementasikan.
-
-## Endpoint
-
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| GET | `/health/live` | Liveness probe |
-| GET | `/health/ready` | Readiness probe |
-| POST | `/api/v1/auth/register` | Registrasi akun |
-| POST | `/api/v1/auth/login` | Login |
-| POST | `/api/v1/auth/refresh` | Rotasi refresh token |
-| POST | `/api/v1/auth/logout` | Logout |
-| GET | `/api/v1/auth/me` | Profil sendiri |
-| GET | `/api/v1/events` | Daftar event published |
-| GET | `/api/v1/events/:id` | Detail event |
-| GET | `/api/v1/events/:id/tiers` | Daftar tier |
-| POST | `/api/v1/events` | Buat draft event |
-| PATCH | `/api/v1/events/:id` | Ubah draft event |
-| POST | `/api/v1/events/:id/tiers` | Tambah tier |
-| PATCH | `/api/v1/tiers/:id` | Ubah tier |
-| POST | `/api/v1/events/:id/publish` | Publikasikan event |
-| POST | `/api/v1/events/:id/pause` | Jeda penjualan |
-| POST | `/api/v1/events/:id/resume` | Lanjutkan penjualan |
-| POST | `/api/v1/events/:id/close` | Tutup penjualan |
-| POST | `/api/v1/events/:id/cancel` | Batalkan event |
-| POST | `/api/v1/events/:id/complete` | Selesaikan event |
-| POST | `/api/v1/bookings` | Buat hold tiket |
-| GET | `/api/v1/bookings` | Daftar booking sendiri |
-| GET | `/api/v1/bookings/:id` | Detail booking |
-| POST | `/api/v1/bookings/:id/cancel` | Batalkan hold |
-
-Endpoint create booking membutuhkan header `Idempotency-Key` sepanjang 16 sampai 128 karakter.
+Migrasi berjalan otomatis saat aplikasi start dan dilindungi advisory lock agar aman ketika API, worker, dan scheduler start bersamaan.
 
 ## Pengujian
 
 ```bash
+gofmt -l .
 go vet ./...
 go build ./...
-go test ./...
+go test ./... -count=1
 ```
 
-## Status
+Test integrasi repository membutuhkan PostgreSQL. Jika dijalankan dari host, arahkan `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, dan `DB_NAME` ke database uji. Jika port host bentrok, jalankan test di network Docker.
 
-Modul autentikasi, katalog event, dan reservasi hold sudah berjalan dan diuji melalui Docker Compose. Pembayaran, e-ticket, check-in, refund, laporan, dan ulasan belum diimplementasikan.
+## Alur Git
 
-## Tim
+- `main` hanya diubah melalui pull request.
+- Setiap anggota bekerja pada branch sendiri.
+- Commit dibuat kecil dengan pesan bahasa Indonesia.
+- Pull request memerlukan review code owner.
+- Merge memakai merge commit, bukan squash.
+- Force push dan penghapusan branch diblokir.
 
-| Nama | GitHub | Fokus |
+Pull request yang sudah merged:
+
+| PR | Branch | Isi |
 | --- | --- | --- |
-| Muhammad Ikhsanudin Arsalan | [@ZaganJade](https://github.com/ZaganJade) | Autentikasi dan keamanan API |
-| Vito Aditya | [@viesloxy](https://github.com/viesloxy) | Infrastruktur dan integrasi |
-| Muhammad Rizki Ibrahim | [@rzkibrahim](https://github.com/rzkibrahim) | Reservasi dan pembayaran |
+| #1 | `feat/domain-rizki` | Katalog event dan reservasi hold |
+| #2 | `feat/auth-arsalan` | Autentikasi dan otorisasi |
+| #3 | `feat/infra-vito` | Integrasi route, migrasi, Docker, README |
+| #4 | `feat/infra-vito` | CODEOWNERS dan review wajib |
+| #5 | `feat/auth-arsalan` | Verifikasi email, reset password, perbaikan event, test integrasi |
+
+## Status dan Batasan
+
+Sudah berjalan:
+
+- Autentikasi, rotasi refresh token, dan logout.
+- Katalog event, tier, publish, dan pengelolaan sale control.
+- Reservasi hold, pembatalan hold, dan idempotency.
+- Health check dan Docker Compose.
+
+Belum dikerjakan:
+
+- Pembayaran, webhook, refund, e-ticket, check-in, dan ulasan.
+- Waiting room dan admission pass.
+- Pengiriman email verifikasi dan reset password.
+- Worker dan scheduler masih berupa loop placeholder.
+- Uji konkurensi penuh dan load test.
+
+## Pranala
+
+- Repository: https://github.com/viesloxy/ngawimusical-backend
+- Pull request: https://github.com/viesloxy/ngawimusical-backend/pulls
+- Issues: https://github.com/viesloxy/ngawimusical-backend/issues
