@@ -86,9 +86,9 @@ func (userPostgres) UpdateProfile(ctx context.Context, db DBTX, user model.User)
 	tag, err := db.Exec(ctx, `
 		UPDATE users
 		SET username = $2,
-		    email = $3,
-		    email_verified_at = CASE WHEN email IS DISTINCT FROM $3 THEN NULL ELSE email_verified_at END,
-		    auth_version = CASE WHEN email IS DISTINCT FROM $3 THEN auth_version + 1 ELSE auth_version END,
+		    email = $3::varchar,
+		    email_verified_at = CASE WHEN email IS DISTINCT FROM $3::varchar THEN NULL ELSE email_verified_at END,
+		    auth_version = CASE WHEN email IS DISTINCT FROM $3::varchar THEN auth_version + 1 ELSE auth_version END,
 		    updated_at = clock_timestamp()
 		WHERE id = $1`,
 		user.ID, user.Username, email,
