@@ -78,7 +78,7 @@ services:
       ADMISSION_PASS_SECRET: ${ADMISSION_PASS_SECRET:-development-admission-secret-change-me}
       TICKET_TOKEN_ENC_KEY: ${TICKET_TOKEN_ENC_KEY:-development-ticket-key-change-me}
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
