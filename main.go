@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 
+	"github.com/viesloxy/ngawimusical-backend/app/repository"
 	"github.com/viesloxy/ngawimusical-backend/app/service"
 	"github.com/viesloxy/ngawimusical-backend/config"
 	"github.com/viesloxy/ngawimusical-backend/database"
@@ -104,6 +105,51 @@ func run() error {
 		}},
 	)
 
+	txManager := database.NewTxManager(pool, cfg.DB.RetryMax)
+
+	userRepo := repository.NewUserRepository()
+	tokens := helper.NewTokenIssuer(cfg.Auth.AccessSecret, cfg.Auth.Issuer, cfg.Auth.Audience, cfg.Auth.AccessTTL)
+	limiter := middleware.NewRedisLimiter(admissionRedis, cfg.Auth.LoginRateLimitPerMin, time.Minute)
+
+	authUsecase, err := service.NewAuthUsecase(userRepo, txManager, tokens, service.AuthUsecaseConfig{
+		AccessTTL:  cfg.Auth.AccessTTL,
+		RefreshTTL: cfg.Auth.RefreshTTL,
+		BcryptCost: cfg.Auth.BcryptCost,
+	})
+	if err != nil {
+		return fmt.Errorf("siapkan usecase auth: %w", err)
+	}
+	authService := service.NewAuthService(authUsecase, userRepo, txManager, tokens, limiter)
+
+	eventRepo := repository.NewPostgresEventRepository(pool)
+	tierRepo := repository.NewPostgresTicketTierRepository(pool)
+	staffRepo := repository.NewPostgresEventStaffRepository(pool)
+	auditRepo := repository.NewPostgresAuditLogRepository(pool)
+	outboxRepo := repository.NewPostgresOutboxRepository(pool)
+	inventoryRepo := repository.NewPostgresInventoryMovementRepository(pool)
+
+	eventUsecase := service.NewEventUsecase(txManager, eventRepo, tierRepo, staffRepo, auditRepo, outboxRepo)
+	eventService := service.NewEventService(eventUsecase, []byte(cfg.Auth.AccessSecret))
+
+	bookingRepo := repository.NewPostgresBookingRepository(pool)
+	userLimitRepo := repository.NewPostgresUserEventLimitRepository(pool)
+	idempotencyRepo := repository.NewPostgresIdempotencyRepository(pool)
+
+	bookingUsecase := service.NewBookingUsecase(
+		txManager,
+		eventRepo,
+		tierRepo,
+		bookingRepo,
+		userLimitRepo,
+		idempotencyRepo,
+		inventoryRepo,
+		outboxRepo,
+		auditRepo,
+		cfg.Business.HoldTTL,
+		cfg.Business.ReleaseGrace,
+	)
+	bookingService := service.NewBookingService(bookingUsecase, []byte(cfg.Auth.AccessSecret))
+
 	app := fiber.New(fiber.Config{
 		AppName:               cfg.App.Name,
 		BodyLimit:             1 << 20,
@@ -115,7 +161,7 @@ func run() error {
 	})
 	app.Use(recover.New())
 	app.Use(middleware.RequestID())
-	route.Register(app, health)
+	route.Register(app, health, authService, eventService, bookingService)
 
 	errCh := make(chan error, 2)
 
