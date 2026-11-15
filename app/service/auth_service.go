@@ -82,8 +82,11 @@ func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
 	if err := s.enforceLimit(c, "forgot:pair:"+normalized+"|"+c.IP()); err != nil {
 		return err
 	}
-	if err := s.enforceLimit(c, "forgot:email:"+normalized); err != nil {
-		return err
+	// Batas per email tidak menolak request: token baru hanya tidak dibuat, dan respons tetap 204,
+	// sehingga pemilik akun tidak terkunci dari pemulihan dan penyerang tidak tahu email terdaftar.
+	allowed, _, err := s.limiter.Allow(c.UserContext(), "forgot:email:"+normalized)
+	if err != nil || !allowed {
+		return helper.NoContent(c)
 	}
 	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
 		return err
