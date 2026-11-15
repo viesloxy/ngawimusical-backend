@@ -212,6 +212,119 @@ func (a *AuthUsecase) Refresh(ctx context.Context, raw string) (model.TokenRespo
 	return session, err
 }
 
+// Masa berlaku token aksi. Tetap di kode agar konfigurasi wiring tidak perlu berubah.
+const (
+	verifyEmailTTL   = 24 * time.Hour
+	resetPasswordTTL = 30 * time.Minute
+)
+
+// errTokenInvalid dikembalikan untuk token aksi yang tidak ada, sudah dipakai, atau kedaluwarsa.
+var errTokenInvalid = helper.NewAppError(http.StatusBadRequest, "TOKEN_INVALID", "Token tidak valid atau sudah kedaluwarsa.")
+
+// RequestEmailVerification membuat token verifikasi email untuk user yang sedang login.
+// Mengembalikan string kosong bila email sudah terverifikasi. Pengiriman email belum ada.
+func (a *AuthUsecase) RequestEmailVerification(ctx context.Context, userID int64) (string, error) {
+	var raw string
+	err := a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
+		user, err := a.users.FindByID(ctx, db, userID)
+		if errors.Is(err, repository.ErrNotFound) {
+			return errSessionInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if user.EmailVerifiedAt != nil {
+			return nil
+		}
+		raw, err = a.issueActionToken(ctx, db, user.ID, model.PurposeVerifyEmail, verifyEmailTTL)
+		return err
+	})
+	return raw, err
+}
+
+// ConfirmEmail menandai email terverifikasi bila token valid, lalu menandai token itu terpakai.
+func (a *AuthUsecase) ConfirmEmail(ctx context.Context, raw string) error {
+	return a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
+		token, err := a.consumeActionToken(ctx, db, raw, model.PurposeVerifyEmail)
+		if err != nil {
+			return err
+		}
+		return a.users.MarkEmailVerified(ctx, db, token.UserID)
+	})
+}
+
+// RequestPasswordReset membuat token reset password bila email terdaftar dan akun aktif.
+// Untuk email yang tidak ada atau akun yang diblokir, tidak ada token dan tidak ada error,
+// sehingga respons tidak membocorkan keberadaan akun.
+func (a *AuthUsecase) RequestPasswordReset(ctx context.Context, email string) (string, error) {
+	var raw string
+	err := a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
+		user, err := a.users.FindByEmail(ctx, db, email)
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if model.LoginBlockReason(user.Status) != nil {
+			return nil
+		}
+		raw, err = a.issueActionToken(ctx, db, user.ID, model.PurposeResetPassword, resetPasswordTTL)
+		return err
+	})
+	return raw, err
+}
+
+// ResetPassword memakai token reset untuk mengganti password. Seluruh sesi user ikut dicabut.
+func (a *AuthUsecase) ResetPassword(ctx context.Context, raw, newPassword string) error {
+	hash, err := helper.HashPassword(newPassword, a.cfg.BcryptCost)
+	if err != nil {
+		return helper.NewValidationError(map[string]string{"new_password": "Maksimal 72 byte."})
+	}
+
+	return a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
+		token, err := a.consumeActionToken(ctx, db, raw, model.PurposeResetPassword)
+		if err != nil {
+			return err
+		}
+		user, err := a.users.FindByID(ctx, db, token.UserID)
+		if errors.Is(err, repository.ErrNotFound) {
+			return errTokenInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if model.LoginBlockReason(user.Status) != nil {
+			return errTokenInvalid
+		}
+		return a.users.UpdatePassword(ctx, db, user.ID, hash)
+	})
+}
+
+// issueActionToken menyimpan hash token aksi dan mengembalikan token mentahnya sekali saja.
+func (a *AuthUsecase) issueActionToken(ctx context.Context, db repository.DBTX, userID int64, purpose string, ttl time.Duration) (string, error) {
+	raw, err := helper.NewRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	err = a.users.CreateIdentityActionToken(ctx, db, model.IdentityActionToken{
+		UserID:    userID,
+		TokenHash: helper.HashRefreshToken(raw),
+		Purpose:   purpose,
+		ExpiresAt: time.Now().UTC().Add(ttl),
+	})
+	return raw, err
+}
+
+// consumeActionToken menandai token terpakai secara atomik. Token yang tidak cocok ditolak generik.
+func (a *AuthUsecase) consumeActionToken(ctx context.Context, db repository.DBTX, raw, purpose string) (model.IdentityActionToken, error) {
+	token, err := a.users.ConsumeIdentityActionToken(ctx, db, helper.HashRefreshToken(raw), purpose, time.Now().UTC())
+	if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
+		return model.IdentityActionToken{}, errTokenInvalid
+	}
+	return token, err
+}
+
 // Logout mencabut seluruh family dari refresh token yang diberikan.
 // Token yang tidak dikenal tetap dianggap berhasil agar tidak membocorkan informasi.
 func (a *AuthUsecase) Logout(ctx context.Context, raw string) error {
