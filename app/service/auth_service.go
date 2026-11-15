@@ -155,6 +155,11 @@ func (s *AuthService) enforceLimit(c *fiber.Ctx, key string) error {
 	return nil
 }
 
+// VerifyAccess membuka verifier untuk middleware route modul lain.
+func (s *AuthService) VerifyAccess(ctx context.Context, raw string) (middleware.Actor, error) {
+	return s.verifyAccess(ctx, raw)
+}
+
 // verifyAccess memeriksa JWT lalu memastikan akun masih aktif, auth_version belum berubah,
 // dan membaca permission terbaru dari database.
 func (s *AuthService) verifyAccess(ctx context.Context, raw string) (middleware.Actor, error) {
