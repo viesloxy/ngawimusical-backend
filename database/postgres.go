@@ -55,14 +55,30 @@ func NewPostgres(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error
 }
 
 // Migrate menjalankan seluruh file migrasi SQL yang belum tercatat di schema_migrations.
+// Migrasi memakai advisory lock agar aman ketika API, worker, dan scheduler start bersamaan.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	const migrationLockKey int64 = 0x4e474157494d55
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("ambil koneksi untuk migrasi: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("ambil advisory lock migrasi: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+	}()
+
 	const createTracker = `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version VARCHAR(255) PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 		)`
 
-	if _, err := pool.Exec(ctx, createTracker); err != nil {
+	if _, err := conn.Exec(ctx, createTracker); err != nil {
 		return fmt.Errorf("buat tabel schema_migrations: %w", err)
 	}
 
@@ -81,7 +97,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 
 		var applied bool
-		if err := pool.QueryRow(ctx,
+		if err := conn.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`,
 			entry.Name(),
 		).Scan(&applied); err != nil {
@@ -96,7 +112,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("baca migrasi %s: %w", entry.Name(), err)
 		}
 
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("mulai transaksi migrasi %s: %w", entry.Name(), err)
 		}

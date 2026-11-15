@@ -90,16 +90,6 @@ type IdentityActionToken struct {
 	CreatedAt  time.Time
 }
 
-// EventStaff adalah penugasan staf pada sebuah event.
-type EventStaff struct {
-	EventID   int64
-	UserID    int64
-	StaffRole string
-	GateID    string
-	Status    string
-	CreatedAt time.Time
-}
-
 // LoginBlockReason mengembalikan alasan akun tidak boleh login.
 // Nil berarti akun aktif dan boleh login.
 func LoginBlockReason(status string) error {
