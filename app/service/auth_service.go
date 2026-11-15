@@ -77,7 +77,7 @@ func (s *AuthService) handleForgotPassword(c *fiber.Ctx) error {
 	if err := helper.Validate(req); err != nil {
 		return err
 	}
-	if err := s.enforceLimit(c, "forgot:email:"+strings.ToLower(strings.TrimSpace(req.Email))); err != nil {
+	if err := s.enforceLimit(c, "forgot:pair:"+strings.ToLower(strings.TrimSpace(req.Email))+"|"+c.IP()); err != nil {
 		return err
 	}
 	if _, err := s.usecase.RequestPasswordReset(c.UserContext(), req.Email); err != nil {
@@ -222,7 +222,7 @@ func (s *AuthService) enforceLimit(c *fiber.Ctx, key string) error {
 	}
 	if !allowed {
 		c.Set(fiber.HeaderRetryAfter, strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-		return helper.NewAppError(http.StatusTooManyRequests, "RATE_LIMITED", "Terlalu banyak percobaan login.").WithRetryable(true)
+		return helper.NewAppError(http.StatusTooManyRequests, "RATE_LIMITED", "Terlalu banyak percobaan, coba lagi nanti.").WithRetryable(true)
 	}
 	return nil
 }
