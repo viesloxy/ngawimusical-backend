@@ -69,16 +69,17 @@ type MongoConfig struct {
 }
 
 type AuthConfig struct {
-	Issuer               string
-	Audience             string
-	AccessSecret         string
-	AccessTTL            time.Duration
-	RefreshTTL           time.Duration
-	AdmissionSecret      string
-	AdmissionTTL         time.Duration
-	TicketTokenEncKey    string
-	BcryptCost           int
-	LoginRateLimitPerMin int
+	Issuer                  string
+	Audience                string
+	AccessSecret            string
+	AccessTTL               time.Duration
+	RefreshTTL              time.Duration
+	AdmissionSecret         string
+	AdmissionTTL            time.Duration
+	TicketTokenEncKey       string
+	BcryptCost              int
+	LoginRateLimitPerMin    int
+	RegisterRateLimitPerMin int
 }
 
 type BusinessConfig struct {
@@ -220,6 +221,9 @@ func Load() (Config, error) {
 		errs = append(errs, err)
 	}
 	if cfg.Auth.LoginRateLimitPerMin, err = envInt("LOGIN_RATE_LIMIT_PER_MINUTE", 5); err != nil {
+		errs = append(errs, err)
+	}
+	if cfg.Auth.RegisterRateLimitPerMin, err = envInt("REGISTER_RATE_LIMIT_PER_MINUTE", 5); err != nil {
 		errs = append(errs, err)
 	}
 

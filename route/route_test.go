@@ -51,6 +51,7 @@ func TestRegisterRoutes(t *testing.T) {
 		tx,
 		tokens,
 		middleware.NewMemoryLimiter(5, time.Minute),
+		middleware.NewMemoryLimiter(5, time.Minute),
 	)
 	eventService := service.NewEventService(
 		usecase.NewEventUsecase(tx, nil, nil, nil, nil, nil),

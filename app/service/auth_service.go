@@ -18,15 +18,16 @@ import (
 
 // AuthService adalah lapisan HTTP untuk endpoint auth. Logika berada di usecase.AuthUsecase.
 type AuthService struct {
-	usecase *usecase.AuthUsecase
-	users   repository.UserRepository
-	tx      repository.TxManager
-	tokens  *helper.TokenIssuer
-	limiter middleware.Limiter
+	usecase         *usecase.AuthUsecase
+	users           repository.UserRepository
+	tx              repository.TxManager
+	tokens          *helper.TokenIssuer
+	limiter         middleware.Limiter
+	registerLimiter middleware.Limiter
 }
 
-func NewAuthService(uc *usecase.AuthUsecase, users repository.UserRepository, tx repository.TxManager, tokens *helper.TokenIssuer, limiter middleware.Limiter) *AuthService {
-	return &AuthService{usecase: uc, users: users, tx: tx, tokens: tokens, limiter: limiter}
+func NewAuthService(uc *usecase.AuthUsecase, users repository.UserRepository, tx repository.TxManager, tokens *helper.TokenIssuer, limiter, registerLimiter middleware.Limiter) *AuthService {
+	return &AuthService{usecase: uc, users: users, tx: tx, tokens: tokens, limiter: limiter, registerLimiter: registerLimiter}
 }
 
 // registeredPath adalah halaman status setelah register sukses (header Location).
@@ -35,7 +36,7 @@ const registeredPath = "/api/v1/auth/register/created"
 // Register memasang seluruh route auth di bawah router. Dipanggil sekali dari wiring utama.
 func (s *AuthService) Register(router fiber.Router) {
 	auth := router.Group("/auth")
-	auth.Post("/register", s.handleRegister)
+	auth.Post("/register", s.limitRegister, s.handleRegister)
 	auth.Get("/register/created", s.handleRegisteredStatus)
 	auth.Post("/login", s.limitLogin, s.handleLogin)
 	auth.Post("/refresh", s.handleRefresh)
@@ -235,7 +236,19 @@ func (s *AuthService) limitLogin(c *fiber.Ctx) error {
 
 // enforceLimit memeriksa satu kunci limiter. Jika limiter gagal, request ditolak (fail closed).
 func (s *AuthService) enforceLimit(c *fiber.Ctx, key string) error {
-	allowed, wait, err := s.limiter.Allow(c.UserContext(), key)
+	return enforceWith(c, s.limiter, key)
+}
+
+// limitRegister membatasi percobaan register per IP dengan limiter sendiri.
+func (s *AuthService) limitRegister(c *fiber.Ctx) error {
+	if err := enforceWith(c, s.registerLimiter, "register:ip:"+c.IP()); err != nil {
+		return err
+	}
+	return c.Next()
+}
+
+func enforceWith(c *fiber.Ctx, limiter middleware.Limiter, key string) error {
+	allowed, wait, err := limiter.Allow(c.UserContext(), key)
 	if err != nil {
 		return helper.Unavailable("SYSTEM_BUSY", "Sistem sedang sibuk, coba lagi.")
 	}

@@ -111,6 +111,7 @@ func run() error {
 	userRepo := repository.NewUserRepository()
 	tokens := helper.NewTokenIssuer(cfg.Auth.AccessSecret, cfg.Auth.Issuer, cfg.Auth.Audience, cfg.Auth.AccessTTL)
 	limiter := middleware.NewRedisLimiter(admissionRedis, cfg.Auth.LoginRateLimitPerMin, time.Minute)
+	registerLimiter := middleware.NewRedisLimiter(admissionRedis, cfg.Auth.RegisterRateLimitPerMin, time.Minute)
 
 	authUsecase, err := usecase.NewAuthUsecase(userRepo, txManager, tokens, usecase.AuthUsecaseConfig{
 		AccessTTL:  cfg.Auth.AccessTTL,
@@ -120,7 +121,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("siapkan usecase auth: %w", err)
 	}
-	authService := service.NewAuthService(authUsecase, userRepo, txManager, tokens, limiter)
+	authService := service.NewAuthService(authUsecase, userRepo, txManager, tokens, limiter, registerLimiter)
 
 	eventRepo := repository.NewPostgresEventRepository(pool)
 	tierRepo := repository.NewPostgresTicketTierRepository(pool)

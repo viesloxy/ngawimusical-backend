@@ -3,6 +3,7 @@ package service_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"github.com/viesloxy/ngawimusical-backend/internal/testfake"
 	"io"
@@ -40,7 +41,7 @@ func newAuthApp(t *testing.T, limiter middleware.Limiter) *fiber.App {
 	}
 
 	app := fiber.New(fiber.Config{ErrorHandler: helper.ErrorHandler})
-	service.NewAuthService(uc, repo, testfake.Tx{}, tokens, limiter).Register(app.Group("/api/v1"))
+	service.NewAuthService(uc, repo, testfake.Tx{}, tokens, limiter, limiter).Register(app.Group("/api/v1"))
 	return app
 }
 
@@ -206,5 +207,19 @@ func TestVerifyEmailRequestWithoutTokenReturns401(t *testing.T) {
 	resp, _ := doRequest(t, app, req)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("tanpa token harus 401, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterOverLimitReturns429(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(5, time.Minute))
+
+	for i := 0; i < 5; i++ {
+		body := fmt.Sprintf(`{"username":"bulk%d","email":"bulk%d@example.com","password":"rahasia123"}`, i, i)
+		postJSON(t, app, "/api/v1/auth/register", body, nil)
+	}
+	body := `{"username":"bulk_terakhir","email":"bulk_terakhir@example.com","password":"rahasia123"}`
+	resp, respBody := postJSON(t, app, "/api/v1/auth/register", body, nil)
+	if resp.StatusCode != http.StatusTooManyRequests || errorCode(t, respBody) != "RATE_LIMITED" {
+		t.Fatalf("register ke-6 harus 429 RATE_LIMITED, dapat %d: %s", resp.StatusCode, respBody)
 	}
 }
