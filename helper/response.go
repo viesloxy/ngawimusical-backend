@@ -8,8 +8,16 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// StatusSuccess dan StatusError adalah nilai field `status` pada envelope.
+const (
+	StatusSuccess = "success"
+	StatusError   = "error"
+)
+
 // SuccessResponse adalah bentuk baku response sukses.
 type SuccessResponse struct {
+	Status    string `json:"status"`
+	Msg       string `json:"msg"`
 	Data      any    `json:"data"`
 	RequestID string `json:"request_id"`
 }
@@ -23,9 +31,23 @@ func RequestID(c *fiber.Ctx) string {
 
 func JSON(c *fiber.Ctx, status int, data any) error {
 	return c.Status(status).JSON(SuccessResponse{
+		Status:    StatusSuccess,
+		Msg:       successMessage(status),
 		Data:      data,
 		RequestID: RequestID(c),
 	})
+}
+
+// successMessage memberi pesan default sesuai status HTTP sukses.
+func successMessage(status int) string {
+	switch status {
+	case fiber.StatusCreated:
+		return "Berhasil dibuat."
+	case fiber.StatusAccepted:
+		return "Permintaan diterima."
+	default:
+		return "Berhasil."
+	}
 }
 
 func OK(c *fiber.Ctx, data any) error {

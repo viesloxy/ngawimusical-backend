@@ -16,14 +16,18 @@ import (
 )
 
 type successEnvelope struct {
-	Data struct {
+	Status string `json:"status"`
+	Msg    string `json:"msg"`
+	Data   struct {
 		Message string `json:"message"`
 	} `json:"data"`
 	RequestID string `json:"request_id"`
 }
 
 type errorEnvelope struct {
-	Error struct {
+	Status string `json:"status"`
+	Msg    string `json:"msg"`
+	Error  struct {
 		Code      string            `json:"code"`
 		Message   string            `json:"message"`
 		Fields    map[string]string `json:"fields"`
@@ -61,6 +65,12 @@ func TestSuccessResponseIncludesRequestID(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+	if body.Status != "success" {
+		t.Fatalf("status = %q, want success", body.Status)
+	}
+	if body.Msg != "Berhasil." {
+		t.Fatalf("msg = %q, want Berhasil.", body.Msg)
+	}
 	if body.RequestID != "req_test_123" {
 		t.Fatalf("request_id = %q, want req_test_123", body.RequestID)
 	}
@@ -89,6 +99,12 @@ func TestErrorHandlerMapsValidationError(t *testing.T) {
 	var body errorEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "error" {
+		t.Fatalf("status = %q, want error", body.Status)
+	}
+	if body.Msg == "" || body.Msg != body.Error.Message {
+		t.Fatalf("msg = %q, want sama dengan error.message %q", body.Msg, body.Error.Message)
 	}
 	if body.Error.Code != "VALIDATION_FAILED" {
 		t.Fatalf("code = %q, want VALIDATION_FAILED", body.Error.Code)
