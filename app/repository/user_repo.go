@@ -60,7 +60,21 @@ func (userPostgres) CreateUser(ctx context.Context, db DBTX, user model.User) (m
 		JOIN roles r ON r.id = i.role_id`,
 		user.Username, normalizeEmail(user.Email), user.PasswordHash, user.RoleName, user.Status,
 	).Scan(scanUser(&user)...)
-	return user, mapDBError(err)
+	return user, mapCreateUserError(err)
+}
+
+// mapCreateUserError membedakan constraint unique email dan username agar pesan bisa spesifik.
+func mapCreateUserError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		switch pgErr.ConstraintName {
+		case "users_email_key":
+			return ErrEmailTaken
+		case "users_username_key":
+			return ErrUsernameTaken
+		}
+	}
+	return mapDBError(err)
 }
 
 func (userPostgres) FindByEmail(ctx context.Context, db DBTX, email string) (model.User, error) {

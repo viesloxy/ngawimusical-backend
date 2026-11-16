@@ -62,8 +62,13 @@ func (a *AuthUsecase) Register(ctx context.Context, req model.RegisterRequest) e
 			RoleName:     model.RoleAttendee,
 			Status:       model.AccountActive,
 		})
-		if errors.Is(err, repository.ErrConflict) {
-			return helper.Conflict("CONFLICT", "Akun tidak dapat didaftarkan dengan data tersebut.")
+		switch {
+		case errors.Is(err, repository.ErrEmailTaken):
+			return helper.Conflict("EMAIL_ALREADY_REGISTERED", "Email sudah terdaftar.").
+				WithFields(map[string]string{"email": "Email sudah terdaftar."})
+		case errors.Is(err, repository.ErrUsernameTaken):
+			return helper.Conflict("USERNAME_TAKEN", "Username sudah digunakan.").
+				WithFields(map[string]string{"username": "Username sudah digunakan."})
 		}
 		return err
 	})

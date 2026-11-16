@@ -57,7 +57,7 @@ func TestRegisterNormalizesEmailWithoutSession(t *testing.T) {
 	}
 }
 
-func TestRegisterDuplicateEmailIsGenericConflict(t *testing.T) {
+func TestRegisterDuplicateEmailReturnsSpecificConflict(t *testing.T) {
 	uc := newTestUsecase(t, testfake.NewUserRepo())
 	req := model.RegisterRequest{Username: "arsalan", Email: "a@example.com", Password: "rahasia123"}
 
@@ -65,7 +65,16 @@ func TestRegisterDuplicateEmailIsGenericConflict(t *testing.T) {
 		t.Fatalf("register pertama: %v", err)
 	}
 	err := uc.Register(context.Background(), req)
-	requireAppError(t, err, http.StatusConflict, "CONFLICT")
+	requireAppError(t, err, http.StatusConflict, "EMAIL_ALREADY_REGISTERED")
+}
+
+func TestRegisterDuplicateUsernameReturnsSpecificConflict(t *testing.T) {
+	uc := newTestUsecase(t, testfake.NewUserRepo())
+	if err := uc.Register(context.Background(), model.RegisterRequest{Username: "arsalan", Email: "a.com", Password: "rahasia123"}); err != nil {
+		t.Fatalf("register pertama: %v", err)
+	}
+	err := uc.Register(context.Background(), model.RegisterRequest{Username: "arsalan", Email: "b.com", Password: "rahasia123"})
+	requireAppError(t, err, http.StatusConflict, "USERNAME_TAKEN")
 }
 
 func TestLoginFailuresUseSameGenericMessage(t *testing.T) {

@@ -37,7 +37,10 @@ func (f *UserRepo) CreateUser(_ context.Context, _ repository.DBTX, u model.User
 	defer f.mu.Unlock()
 	for _, existing := range f.Users {
 		if existing.Email == u.Email {
-			return model.User{}, repository.ErrConflict
+			return model.User{}, repository.ErrEmailTaken
+		}
+		if existing.Username == u.Username {
+			return model.User{}, repository.ErrUsernameTaken
 		}
 	}
 	u.ID = f.id()
