@@ -2,6 +2,7 @@ package route_test
 
 import (
 	"context"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"testing"
 	"time"
 
@@ -30,11 +31,11 @@ func TestRegisterRoutes(t *testing.T) {
 	tx := noopTxManager{}
 	tokens := helper.NewTokenIssuer("secret-test", "ngawimusical", "ngawimusical-api", time.Minute)
 
-	authUsecase, err := service.NewAuthUsecase(
+	authUsecase, err := usecase.NewAuthUsecase(
 		repository.NewUserRepository(),
 		tx,
 		tokens,
-		service.AuthUsecaseConfig{
+		usecase.AuthUsecaseConfig{
 			AccessTTL:  time.Minute,
 			RefreshTTL: time.Hour,
 			BcryptCost: 4,
@@ -50,13 +51,14 @@ func TestRegisterRoutes(t *testing.T) {
 		tx,
 		tokens,
 		middleware.NewMemoryLimiter(5, time.Minute),
+		middleware.NewMemoryLimiter(5, time.Minute),
 	)
 	eventService := service.NewEventService(
-		service.NewEventUsecase(tx, nil, nil, nil, nil, nil),
+		usecase.NewEventUsecase(tx, nil, nil, nil, nil, nil),
 		[]byte("secret-test"),
 	)
 	bookingService := service.NewBookingService(
-		service.NewBookingUsecase(tx, nil, nil, nil, nil, nil, nil, nil, nil, time.Minute, time.Minute),
+		usecase.NewBookingUsecase(tx, nil, nil, nil, nil, nil, nil, nil, nil, time.Minute, time.Minute),
 		[]byte("secret-test"),
 	)
 

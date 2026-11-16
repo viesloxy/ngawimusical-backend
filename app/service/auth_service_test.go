@@ -3,6 +3,9 @@ package service_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
+	"github.com/viesloxy/ngawimusical-backend/internal/testfake"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,13 +25,13 @@ const testRegisterBody = `{"username":"arsalan","email":"a@example.com","passwor
 func newAuthApp(t *testing.T, limiter middleware.Limiter) *fiber.App {
 	t.Helper()
 
-	repo := newFakeRepo()
+	repo := testfake.NewUserRepo()
 	secret, err := helper.NewRefreshToken()
 	if err != nil {
 		t.Fatalf("buat secret acak: %v", err)
 	}
 	tokens := helper.NewTokenIssuer(secret, "ngawimusical", "ngawimusical-api", 15*time.Minute)
-	uc, err := service.NewAuthUsecase(repo, fakeTx{}, tokens, service.AuthUsecaseConfig{
+	uc, err := usecase.NewAuthUsecase(repo, testfake.Tx{}, tokens, usecase.AuthUsecaseConfig{
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 24 * time.Hour,
 		BcryptCost: 4,
@@ -38,7 +41,7 @@ func newAuthApp(t *testing.T, limiter middleware.Limiter) *fiber.App {
 	}
 
 	app := fiber.New(fiber.Config{ErrorHandler: helper.ErrorHandler})
-	service.NewAuthService(uc, repo, fakeTx{}, tokens, limiter).Register(app.Group("/api/v1"))
+	service.NewAuthService(uc, repo, testfake.Tx{}, tokens, limiter, limiter).Register(app.Group("/api/v1"))
 	return app
 }
 
@@ -79,15 +82,31 @@ func errorCode(t *testing.T, body []byte) string {
 	return payload.Error.Code
 }
 
-func TestRegisterReturns201WithTokens(t *testing.T) {
+func TestRegisterReturns201WithoutTokens(t *testing.T) {
 	app := newAuthApp(t, middleware.NewMemoryLimiter(5, time.Minute))
 
 	resp, body := postJSON(t, app, "/api/v1/auth/register", testRegisterBody, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register harus 201, dapat %d: %s", resp.StatusCode, body)
 	}
-	if !bytes.Contains(body, []byte(`"access_token"`)) || !bytes.Contains(body, []byte(`"refresh_token"`)) {
-		t.Fatalf("respons register harus berisi token: %s", body)
+	if loc := resp.Header.Get("Location"); loc != "/api/v1/auth/register/created" {
+		t.Fatalf("Location = %q, want halaman status register", loc)
+	}
+	if bytes.Contains(body, []byte(`"access_token"`)) || bytes.Contains(body, []byte(`"refresh_token"`)) {
+		t.Fatalf("respons register tidak boleh berisi token: %s", body)
+	}
+}
+
+func TestRegisteredStatusPageReturns200(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(5, time.Minute))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/register/created", nil)
+	resp, body := doRequest(t, app, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("halaman status harus 200, dapat %d: %s", resp.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte(`"access_token"`)) {
+		t.Fatalf("halaman status tidak boleh berisi token: %s", body)
 	}
 }
 
@@ -113,7 +132,8 @@ func TestMeWithoutTokenReturns401(t *testing.T) {
 func TestMeWithValidTokenReturns200(t *testing.T) {
 	app := newAuthApp(t, middleware.NewMemoryLimiter(5, time.Minute))
 
-	_, body := postJSON(t, app, "/api/v1/auth/register", testRegisterBody, nil)
+	postJSON(t, app, "/api/v1/auth/register", testRegisterBody, nil)
+	_, body := postJSON(t, app, "/api/v1/auth/login", `{"email":"a@example.com","password":"rahasia123"}`, nil)
 	var session struct {
 		Data struct {
 			AccessToken string `json:"access_token"`
@@ -187,5 +207,19 @@ func TestVerifyEmailRequestWithoutTokenReturns401(t *testing.T) {
 	resp, _ := doRequest(t, app, req)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("tanpa token harus 401, dapat %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterOverLimitReturns429(t *testing.T) {
+	app := newAuthApp(t, middleware.NewMemoryLimiter(5, time.Minute))
+
+	for i := 0; i < 5; i++ {
+		body := fmt.Sprintf(`{"username":"bulk%d","email":"bulk%d@example.com","password":"rahasia123"}`, i, i)
+		postJSON(t, app, "/api/v1/auth/register", body, nil)
+	}
+	body := `{"username":"bulk_terakhir","email":"bulk_terakhir@example.com","password":"rahasia123"}`
+	resp, respBody := postJSON(t, app, "/api/v1/auth/register", body, nil)
+	if resp.StatusCode != http.StatusTooManyRequests || errorCode(t, respBody) != "RATE_LIMITED" {
+		t.Fatalf("register ke-6 harus 429 RATE_LIMITED, dapat %d: %s", resp.StatusCode, respBody)
 	}
 }

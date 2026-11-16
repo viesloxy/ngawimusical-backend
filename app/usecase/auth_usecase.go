@@ -1,4 +1,4 @@
-package service
+package usecase
 
 import (
 	"context"
@@ -44,36 +44,34 @@ func NewAuthUsecase(users repository.UserRepository, tx repository.TxManager, to
 // errInvalidCredentials dipakai untuk semua kegagalan login agar tidak membocorkan keberadaan akun.
 var errInvalidCredentials = helper.NewAppError(http.StatusUnauthorized, "UNAUTHENTICATED", "Email atau password salah.")
 
-// errSessionInvalid dikembalikan untuk refresh token yang tidak bisa dipakai.
-var errSessionInvalid = helper.NewAppError(http.StatusUnauthorized, "UNAUTHENTICATED", "Sesi tidak valid, silakan login ulang.")
+// ErrSessionInvalid dikembalikan untuk refresh token yang tidak bisa dipakai.
+var ErrSessionInvalid = helper.NewAppError(http.StatusUnauthorized, "UNAUTHENTICATED", "Sesi tidak valid, silakan login ulang.")
 
-// Register membuat akun attendee baru dan langsung mengembalikan sepasang token.
-func (a *AuthUsecase) Register(ctx context.Context, req model.RegisterRequest) (model.TokenResponse, error) {
+// Register membuat akun attendee baru. Tidak membuka sesi: login tetap lewat Login.
+func (a *AuthUsecase) Register(ctx context.Context, req model.RegisterRequest) error {
 	hash, err := helper.HashPassword(req.Password, a.cfg.BcryptCost)
 	if err != nil {
-		return model.TokenResponse{}, helper.NewValidationError(map[string]string{"password": "Maksimal 72 byte."})
+		return helper.NewValidationError(map[string]string{"password": "Maksimal 72 byte."})
 	}
 
-	var session model.TokenResponse
-	err = a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
-		user, err := a.users.CreateUser(ctx, db, model.User{
+	return a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
+		_, err := a.users.CreateUser(ctx, db, model.User{
 			Username:     strings.TrimSpace(req.Username),
 			Email:        strings.ToLower(strings.TrimSpace(req.Email)),
 			PasswordHash: hash,
 			RoleName:     model.RoleAttendee,
 			Status:       model.AccountActive,
 		})
-		if errors.Is(err, repository.ErrConflict) {
-			return helper.Conflict("CONFLICT", "Akun tidak dapat didaftarkan dengan data tersebut.")
+		switch {
+		case errors.Is(err, repository.ErrEmailTaken):
+			return helper.Conflict("EMAIL_ALREADY_REGISTERED", "Email sudah terdaftar.").
+				WithFields(map[string]string{"email": "Email sudah terdaftar."})
+		case errors.Is(err, repository.ErrUsernameTaken):
+			return helper.Conflict("USERNAME_TAKEN", "Username sudah digunakan.").
+				WithFields(map[string]string{"username": "Username sudah digunakan."})
 		}
-		if err != nil {
-			return err
-		}
-
-		session, err = a.issueSession(ctx, db, user, uuid.NewString(), nil)
 		return err
 	})
-	return session, err
 }
 
 // Login memeriksa kredensial dan status akun, lalu membuka sesi baru.
@@ -131,8 +129,8 @@ func (a *AuthUsecase) newSession(user model.User, family string, parentID *int64
 	session := model.TokenResponse{
 		AccessToken:  access,
 		RefreshToken: raw,
-		TokenType:    "Bearer",
 		ExpiresIn:    int64(a.cfg.AccessTTL.Seconds()),
+		ExpiresAt:    time.Now().Add(a.cfg.AccessTTL).UTC().Format(time.RFC3339),
 	}
 	next := model.RefreshToken{
 		UserID:    user.ID,
@@ -154,7 +152,7 @@ func (a *AuthUsecase) Refresh(ctx context.Context, raw string) (model.TokenRespo
 	err := a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
 		current, err := a.users.FindRefreshTokenByHash(ctx, db, helper.HashRefreshToken(raw))
 		if errors.Is(err, repository.ErrNotFound) {
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 		if err != nil {
 			return err
@@ -163,21 +161,21 @@ func (a *AuthUsecase) Refresh(ctx context.Context, raw string) (model.TokenRespo
 
 		if current.UsedAt != nil {
 			reused = true
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 		if !current.IsUsable(time.Now().UTC()) {
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 
 		user, err := a.users.FindByID(ctx, db, current.UserID)
 		if errors.Is(err, repository.ErrNotFound) {
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 		if err != nil {
 			return err
 		}
 		if model.LoginBlockReason(user.Status) != nil {
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 
 		pair, next, err := a.newSession(user, current.FamilyID, &current.ID)
@@ -188,7 +186,7 @@ func (a *AuthUsecase) Refresh(ctx context.Context, raw string) (model.TokenRespo
 			if errors.Is(err, repository.ErrConflict) {
 				// Dua permintaan paralel memakai token yang sama: yang kalah dianggap pencurian.
 				reused = true
-				return errSessionInvalid
+				return ErrSessionInvalid
 			}
 			return err
 		}
@@ -207,7 +205,7 @@ func (a *AuthUsecase) Refresh(ctx context.Context, raw string) (model.TokenRespo
 		}); revokeErr != nil {
 			return model.TokenResponse{}, revokeErr
 		}
-		return model.TokenResponse{}, errSessionInvalid
+		return model.TokenResponse{}, ErrSessionInvalid
 	}
 	return session, err
 }
@@ -228,7 +226,7 @@ func (a *AuthUsecase) RequestEmailVerification(ctx context.Context, userID int64
 	err := a.tx.WithTx(ctx, func(ctx context.Context, db repository.DBTX) error {
 		user, err := a.users.FindByID(ctx, db, userID)
 		if errors.Is(err, repository.ErrNotFound) {
-			return errSessionInvalid
+			return ErrSessionInvalid
 		}
 		if err != nil {
 			return err

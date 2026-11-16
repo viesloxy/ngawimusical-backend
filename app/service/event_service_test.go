@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -249,7 +250,7 @@ func setupEventTestApp() (*fiber.App, *fakeEventRepo, *fakeTierRepo) {
 	staffRepo := &fakeStaffRepo{}
 	txMgr := &noopTxMgr{}
 
-	uc := service.NewEventUsecase(txMgr, eventRepo, tierRepo, staffRepo, auditRepo, outboxRepo)
+	uc := usecase.NewEventUsecase(txMgr, eventRepo, tierRepo, staffRepo, auditRepo, outboxRepo)
 	svc := service.NewEventService(uc, []byte("test-secret-at-least-32-bytes-long!"))
 
 	api := app.Group("/api/v1")
@@ -331,7 +332,7 @@ func TestEventService_CreateEvent_WithActor(t *testing.T) {
 
 	eventRepo := newFakeEventRepo()
 	tierRepo := newFakeTierRepo()
-	uc := service.NewEventUsecase(&noopTxMgr{}, eventRepo, tierRepo, &fakeStaffRepo{}, &fakeAuditRepo{}, &fakeOutboxRepo{})
+	uc := usecase.NewEventUsecase(&noopTxMgr{}, eventRepo, tierRepo, &fakeStaffRepo{}, &fakeAuditRepo{}, &fakeOutboxRepo{})
 	svc := service.NewEventService(uc, []byte("test-secret-at-least-32-bytes-long!"))
 
 	// Inject middleware actor palsu
@@ -368,7 +369,7 @@ func newEventAppAs(actor *middleware.Actor, events ...*model.Event) (*fiber.App,
 	for _, e := range events {
 		eventRepo.events[e.ID] = e
 	}
-	uc := service.NewEventUsecase(&noopTxMgr{}, eventRepo, newFakeTierRepo(), &fakeStaffRepo{}, &fakeAuditRepo{}, &fakeOutboxRepo{})
+	uc := usecase.NewEventUsecase(&noopTxMgr{}, eventRepo, newFakeTierRepo(), &fakeStaffRepo{}, &fakeAuditRepo{}, &fakeOutboxRepo{})
 	svc := service.NewEventService(uc, []byte("test-secret-at-least-32-bytes-long!"))
 
 	if actor != nil {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,12 +13,12 @@ import (
 
 // EventService menangani HTTP request/response untuk endpoint event.
 type EventService struct {
-	uc           *EventUsecase
+	uc           *usecase.EventUsecase
 	cursorSecret []byte
 }
 
 // NewEventService membuat instance baru EventService.
-func NewEventService(uc *EventUsecase, cursorSecret []byte) *EventService {
+func NewEventService(uc *usecase.EventUsecase, cursorSecret []byte) *EventService {
 	return &EventService{uc: uc, cursorSecret: cursorSecret}
 }
 
@@ -122,7 +123,7 @@ func (s *EventService) ListPublishedEvents(c *fiber.Ctx) error {
 
 	responses := make([]model.EventListResponse, len(events))
 	for i, e := range events {
-		responses[i] = ToEventListResponse(e)
+		responses[i] = toEventListResponse(e)
 	}
 
 	result := fiber.Map{
@@ -243,7 +244,7 @@ func (s *EventService) ListTiers(c *fiber.Ctx) error {
 
 	responses := make([]model.TierResponse, len(tiers))
 	for i, t := range tiers {
-		responses[i] = ToTierResponse(t)
+		responses[i] = toTierResponse(t)
 	}
 
 	return helper.OK(c, responses)
@@ -380,4 +381,38 @@ func (s *EventService) CompleteEvent(c *fiber.Ctx) error {
 	}
 
 	return helper.OK(c, fiber.Map{"message": "Event ditandai selesai."})
+}
+
+// toEventListResponse mengonversi entity Event ke DTO daftar.
+func toEventListResponse(e model.Event) model.EventListResponse {
+	return model.EventListResponse{
+		ID:            e.ID,
+		Code:          e.Code,
+		Title:         e.Title,
+		Venue:         e.Venue,
+		VenueCapacity: e.VenueCapacity,
+		Status:        e.Status,
+		SaleOpenAt:    e.SaleOpenAt,
+		SaleCloseAt:   e.SaleCloseAt,
+		StartsAt:      e.StartsAt,
+		EndsAt:        e.EndsAt,
+		CreatedAt:     e.CreatedAt,
+	}
+}
+
+// toTierResponse mengonversi entity TicketTier ke DTO respons.
+func toTierResponse(t model.TicketTier) model.TierResponse {
+	available := t.AvailableCount()
+	return model.TierResponse{
+		ID:             t.ID,
+		EventID:        t.EventID,
+		Code:           t.Code,
+		Name:           t.Name,
+		PriceAmount:    t.PriceAmount,
+		FeeAmount:      t.FeeAmount,
+		Quota:          t.Quota,
+		AvailableCount: available,
+		Status:         model.TierAvailabilityStatus(available),
+		CreatedAt:      t.CreatedAt,
+	}
 }

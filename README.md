@@ -70,8 +70,8 @@ Aturan dependensi:
 
 - `app/model` tidak mengimpor package internal proyek.
 - `app/repository` tidak mengimpor Fiber.
-- `app/service/*_usecase.go` tidak menerima `*fiber.Ctx` dan tidak menulis SQL.
-- `app/service/*_service.go` menangani HTTP dan memanggil usecase.
+- `app/usecase` tidak mengimpor Fiber maupun `app/service`, dan tidak menulis SQL.
+- `app/service` menangani HTTP dan memanggil `app/usecase`.
 - Semua error dipetakan ke envelope response yang sama.
 - Tidak ada folder `controller/` atau `handler/`.
 
@@ -81,7 +81,8 @@ Aturan dependensi:
 app/
   model/        entity, value object, DTO, aturan transisi
   repository/   kontrak dan implementasi akses data
-  service/      usecase dan handler HTTP
+  usecase/      logika bisnis dan transaksi
+  service/      handler HTTP
 config/         konfigurasi aplikasi
 database/       koneksi database dan migrasi
 helper/         error, response, validator, cursor, crypto

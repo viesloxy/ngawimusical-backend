@@ -85,8 +85,20 @@ func Unavailable(code, message string) *AppError {
 
 // ErrorResponse adalah bentuk baku response error.
 type ErrorResponse struct {
+	Status    string      `json:"status"`
+	Msg       string      `json:"msg"`
 	Error     ErrorDetail `json:"error"`
 	RequestID string      `json:"request_id"`
+}
+
+// newErrorResponse membangun envelope error; msg selalu sama dengan error.message.
+func newErrorResponse(detail ErrorDetail, requestID string) ErrorResponse {
+	return ErrorResponse{
+		Status:    StatusError,
+		Msg:       detail.Message,
+		Error:     detail,
+		RequestID: requestID,
+	}
 }
 
 type ErrorDetail struct {
@@ -102,37 +114,28 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 
 	var appErr *AppError
 	if errors.As(err, &appErr) {
-		return c.Status(appErr.Status).JSON(ErrorResponse{
-			Error: ErrorDetail{
-				Code:      appErr.Code,
-				Message:   appErr.Message,
-				Fields:    appErr.Fields,
-				Retryable: appErr.Retryable,
-			},
-			RequestID: requestID,
-		})
+		return c.Status(appErr.Status).JSON(newErrorResponse(ErrorDetail{
+			Code:      appErr.Code,
+			Message:   appErr.Message,
+			Fields:    appErr.Fields,
+			Retryable: appErr.Retryable,
+		}, requestID))
 	}
 
 	var fiberErr *fiber.Error
 	if errors.As(err, &fiberErr) {
-		return c.Status(fiberErr.Code).JSON(ErrorResponse{
-			Error: ErrorDetail{
-				Code:    codeForStatus(fiberErr.Code),
-				Message: messageForStatus(fiberErr.Code),
-			},
-			RequestID: requestID,
-		})
+		return c.Status(fiberErr.Code).JSON(newErrorResponse(ErrorDetail{
+			Code:    codeForStatus(fiberErr.Code),
+			Message: messageForStatus(fiberErr.Code),
+		}, requestID))
 	}
 
 	slog.Error("kesalahan internal", "request_id", requestID, "error", err)
 
-	return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
-		Error: ErrorDetail{
-			Code:    "INTERNAL_ERROR",
-			Message: "Terjadi kesalahan pada server.",
-		},
-		RequestID: requestID,
-	})
+	return c.Status(http.StatusInternalServerError).JSON(newErrorResponse(ErrorDetail{
+		Code:    "INTERNAL_ERROR",
+		Message: "Terjadi kesalahan pada server.",
+	}, requestID))
 }
 
 func codeForStatus(status int) string {

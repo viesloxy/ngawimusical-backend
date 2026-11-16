@@ -73,8 +73,8 @@ func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
 		RoleName:     model.RoleAttendee,
 		Status:       model.AccountActive,
 	})
-	if !errors.Is(err, repository.ErrConflict) {
-		t.Fatalf("email duplikat harus ErrConflict, dapat: %v", err)
+	if !errors.Is(err, repository.ErrEmailTaken) {
+		t.Fatalf("email duplikat harus ErrEmailTaken, dapat: %v", err)
 	}
 }
 

@@ -7,6 +7,8 @@ import "errors"
 var (
 	ErrNotFound             = errors.New("resource tidak ditemukan")
 	ErrConflict             = errors.New("konflik data")
+	ErrEmailTaken           = errors.New("email sudah terdaftar")
+	ErrUsernameTaken        = errors.New("username sudah digunakan")
 	ErrSoldOut              = errors.New("stok tiket habis")
 	ErrUserLimitExceeded    = errors.New("batas tiket pengguna terlampaui")
 	ErrActiveHoldExists     = errors.New("masih ada hold aktif")

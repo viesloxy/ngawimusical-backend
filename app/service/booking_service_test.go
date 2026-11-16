@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -242,7 +243,7 @@ func setupBookingTestApp() (*fiber.App, *fakeEventRepo, *fakeTierRepo, *fakeBook
 	auditRepo := &fakeAuditRepo{}
 	txMgr := &noopTxMgr{}
 
-	uc := service.NewBookingUsecase(
+	uc := usecase.NewBookingUsecase(
 		txMgr, eventRepo, tierRepo, bookingRepo, userLimitRepo, idempotencyRepo,
 		inventoryRepo, outboxRepo, auditRepo, 10*time.Minute, 2*time.Minute,
 	)

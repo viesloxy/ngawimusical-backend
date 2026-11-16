@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"math"
 	"net/http"
 	"strconv"
@@ -15,23 +16,28 @@ import (
 	"github.com/viesloxy/ngawimusical-backend/middleware"
 )
 
-// AuthService adalah lapisan HTTP untuk endpoint auth. Logika berada di AuthUsecase.
+// AuthService adalah lapisan HTTP untuk endpoint auth. Logika berada di usecase.AuthUsecase.
 type AuthService struct {
-	usecase *AuthUsecase
-	users   repository.UserRepository
-	tx      repository.TxManager
-	tokens  *helper.TokenIssuer
-	limiter middleware.Limiter
+	usecase         *usecase.AuthUsecase
+	users           repository.UserRepository
+	tx              repository.TxManager
+	tokens          *helper.TokenIssuer
+	limiter         middleware.Limiter
+	registerLimiter middleware.Limiter
 }
 
-func NewAuthService(usecase *AuthUsecase, users repository.UserRepository, tx repository.TxManager, tokens *helper.TokenIssuer, limiter middleware.Limiter) *AuthService {
-	return &AuthService{usecase: usecase, users: users, tx: tx, tokens: tokens, limiter: limiter}
+func NewAuthService(uc *usecase.AuthUsecase, users repository.UserRepository, tx repository.TxManager, tokens *helper.TokenIssuer, limiter, registerLimiter middleware.Limiter) *AuthService {
+	return &AuthService{usecase: uc, users: users, tx: tx, tokens: tokens, limiter: limiter, registerLimiter: registerLimiter}
 }
+
+// registeredPath adalah halaman status setelah register sukses (header Location).
+const registeredPath = "/api/v1/auth/register/created"
 
 // Register memasang seluruh route auth di bawah router. Dipanggil sekali dari wiring utama.
 func (s *AuthService) Register(router fiber.Router) {
 	auth := router.Group("/auth")
-	auth.Post("/register", s.handleRegister)
+	auth.Post("/register", s.limitRegister, s.handleRegister)
+	auth.Get("/register/created", s.handleRegisteredStatus)
 	auth.Post("/login", s.limitLogin, s.handleLogin)
 	auth.Post("/refresh", s.handleRefresh)
 	auth.Post("/logout", s.handleLogout)
@@ -117,11 +123,17 @@ func (s *AuthService) handleRegister(c *fiber.Ctx) error {
 		return err
 	}
 
-	session, err := s.usecase.Register(c.UserContext(), req)
-	if err != nil {
+	if err := s.usecase.Register(c.UserContext(), req); err != nil {
 		return err
 	}
-	return helper.Created(c, session)
+	// Tanpa token: user harus login. Respons hanya menunjuk ke halaman status pendaftaran.
+	c.Set(fiber.HeaderLocation, registeredPath)
+	return helper.Created(c, fiber.Map{"state": "CREATED"})
+}
+
+// handleRegisteredStatus adalah halaman status setelah register. Hanya berisi status, tanpa token.
+func (s *AuthService) handleRegisteredStatus(c *fiber.Ctx) error {
+	return helper.OK(c, fiber.Map{"state": "CREATED"})
 }
 
 func (s *AuthService) handleLogin(c *fiber.Ctx) error {
@@ -224,7 +236,19 @@ func (s *AuthService) limitLogin(c *fiber.Ctx) error {
 
 // enforceLimit memeriksa satu kunci limiter. Jika limiter gagal, request ditolak (fail closed).
 func (s *AuthService) enforceLimit(c *fiber.Ctx, key string) error {
-	allowed, wait, err := s.limiter.Allow(c.UserContext(), key)
+	return enforceWith(c, s.limiter, key)
+}
+
+// limitRegister membatasi percobaan register per IP dengan limiter sendiri.
+func (s *AuthService) limitRegister(c *fiber.Ctx) error {
+	if err := enforceWith(c, s.registerLimiter, "register:ip:"+c.IP()); err != nil {
+		return err
+	}
+	return c.Next()
+}
+
+func enforceWith(c *fiber.Ctx, limiter middleware.Limiter, key string) error {
+	allowed, wait, err := limiter.Allow(c.UserContext(), key)
 	if err != nil {
 		return helper.Unavailable("SYSTEM_BUSY", "Sistem sedang sibuk, coba lagi.")
 	}
@@ -255,7 +279,7 @@ func (s *AuthService) verifyAccess(ctx context.Context, raw string) (middleware.
 			return err
 		}
 		if model.LoginBlockReason(user.Status) != nil || user.AuthVersion != claims.AuthVersion {
-			return errSessionInvalid
+			return usecase.ErrSessionInvalid
 		}
 
 		permissions, err := s.users.ListPermissions(ctx, db, user.ID)

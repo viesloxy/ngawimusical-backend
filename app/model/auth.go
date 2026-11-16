@@ -43,8 +43,8 @@ type ResetPasswordRequest struct {
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int64  `json:"expires_in"`
+	ExpiresIn    int64  `json:"expires_in"` // detik, seperti konvensi Google OAuth 2.0
+	ExpiresAt    string `json:"expires_at"` // RFC 3339 UTC, sesuai kontrak waktu
 }
 
 // ProfileResponse adalah data profil aktor yang sedang login.
