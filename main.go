@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -111,7 +112,7 @@ func run() error {
 	tokens := helper.NewTokenIssuer(cfg.Auth.AccessSecret, cfg.Auth.Issuer, cfg.Auth.Audience, cfg.Auth.AccessTTL)
 	limiter := middleware.NewRedisLimiter(admissionRedis, cfg.Auth.LoginRateLimitPerMin, time.Minute)
 
-	authUsecase, err := service.NewAuthUsecase(userRepo, txManager, tokens, service.AuthUsecaseConfig{
+	authUsecase, err := usecase.NewAuthUsecase(userRepo, txManager, tokens, usecase.AuthUsecaseConfig{
 		AccessTTL:  cfg.Auth.AccessTTL,
 		RefreshTTL: cfg.Auth.RefreshTTL,
 		BcryptCost: cfg.Auth.BcryptCost,
@@ -128,14 +129,14 @@ func run() error {
 	outboxRepo := repository.NewPostgresOutboxRepository(pool)
 	inventoryRepo := repository.NewPostgresInventoryMovementRepository(pool)
 
-	eventUsecase := service.NewEventUsecase(txManager, eventRepo, tierRepo, staffRepo, auditRepo, outboxRepo)
+	eventUsecase := usecase.NewEventUsecase(txManager, eventRepo, tierRepo, staffRepo, auditRepo, outboxRepo)
 	eventService := service.NewEventService(eventUsecase, []byte(cfg.Auth.AccessSecret))
 
 	bookingRepo := repository.NewPostgresBookingRepository(pool)
 	userLimitRepo := repository.NewPostgresUserEventLimitRepository(pool)
 	idempotencyRepo := repository.NewPostgresIdempotencyRepository(pool)
 
-	bookingUsecase := service.NewBookingUsecase(
+	bookingUsecase := usecase.NewBookingUsecase(
 		txManager,
 		eventRepo,
 		tierRepo,

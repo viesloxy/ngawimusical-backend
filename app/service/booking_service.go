@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"github.com/viesloxy/ngawimusical-backend/app/usecase"
 	"strconv"
 	"strings"
 
@@ -14,12 +15,12 @@ import (
 
 // BookingService menangani HTTP request/response untuk endpoint booking.
 type BookingService struct {
-	uc           *BookingUsecase
+	uc           *usecase.BookingUsecase
 	cursorSecret []byte
 }
 
 // NewBookingService membuat instance baru BookingService.
-func NewBookingService(uc *BookingUsecase, cursorSecret []byte) *BookingService {
+func NewBookingService(uc *usecase.BookingUsecase, cursorSecret []byte) *BookingService {
 	return &BookingService{uc: uc, cursorSecret: cursorSecret}
 }
 
@@ -83,7 +84,7 @@ func (s *BookingService) CreateHold(c *fiber.Ctx) error {
 		"quantity": req.Quantity,
 	})
 
-	internalReq := CreateHoldRequestInternal{
+	internalReq := usecase.CreateHoldRequestInternal{
 		UserID:         actor.UserID,
 		EventID:        eventID,
 		TierID:         tierID,

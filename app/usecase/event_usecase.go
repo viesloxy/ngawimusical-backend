@@ -1,4 +1,4 @@
-package service
+package usecase
 
 import (
 	"context"
@@ -636,40 +636,6 @@ func generateEventCode() (string, error) {
 		return "", err
 	}
 	return "evt_" + hex.EncodeToString(bytes), nil
-}
-
-// ToEventListResponse mengonversi entity Event ke DTO daftar.
-func ToEventListResponse(e model.Event) model.EventListResponse {
-	return model.EventListResponse{
-		ID:            e.ID,
-		Code:          e.Code,
-		Title:         e.Title,
-		Venue:         e.Venue,
-		VenueCapacity: e.VenueCapacity,
-		Status:        e.Status,
-		SaleOpenAt:    e.SaleOpenAt,
-		SaleCloseAt:   e.SaleCloseAt,
-		StartsAt:      e.StartsAt,
-		EndsAt:        e.EndsAt,
-		CreatedAt:     e.CreatedAt,
-	}
-}
-
-// ToTierResponse mengonversi entity TicketTier ke DTO respons.
-func ToTierResponse(t model.TicketTier) model.TierResponse {
-	available := t.AvailableCount()
-	return model.TierResponse{
-		ID:             t.ID,
-		EventID:        t.EventID,
-		Code:           t.Code,
-		Name:           t.Name,
-		PriceAmount:    t.PriceAmount,
-		FeeAmount:      t.FeeAmount,
-		Quota:          t.Quota,
-		AvailableCount: available,
-		Status:         model.TierAvailabilityStatus(available),
-		CreatedAt:      t.CreatedAt,
-	}
 }
 
 // suppress unused import
